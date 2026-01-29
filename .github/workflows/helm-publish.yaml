@@ -1,0 +1,57 @@
+name: Publish Helm Chart
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p .deploy
+          helm package charts/kubebao --destination .deploy
+
+      - name: Create/Update gh-pages branch
+        run: |
+          # Check if gh-pages exists
+          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            git fetch origin gh-pages
+            git checkout gh-pages
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . || true
+          fi
+          
+          # Copy packaged charts
+          cp -r .deploy/* . 2>/dev/null || true
+          
+          # Create/update index
+          helm repo index . --url https://${{ github.repository_owner }}.github.io/kubebao
+          
+          # Commit and push
+          git add .
+          git commit -m "Update Helm chart" || echo "No changes to commit"
+          git push origin gh-pages --force

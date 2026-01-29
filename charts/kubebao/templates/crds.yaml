@@ -1,0 +1,268 @@
+{{- if and .Values.operator.enabled .Values.operator.crds.install -}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: baosecrets.kubebao.io
+  labels:
+    {{- include "kubebao.labels" . | nindent 4 }}
+spec:
+  group: kubebao.io
+  names:
+    kind: BaoSecret
+    listKind: BaoSecretList
+    plural: baosecrets
+    singular: baosecret
+    shortNames:
+      - bs
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.secretPath
+      name: Secret Path
+      type: string
+    - jsonPath: .spec.target.name
+      name: Target
+      type: string
+    - jsonPath: .status.lastSyncTime
+      name: Last Sync
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+              - secretPath
+              - target
+            properties:
+              secretPath:
+                type: string
+              secretKey:
+                type: string
+              secretEngine:
+                type: string
+                default: kv
+              target:
+                type: object
+                required:
+                  - name
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  type:
+                    type: string
+                    default: Opaque
+                  labels:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  annotations:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  creationPolicy:
+                    type: string
+                    enum: [Owner, Orphan, Merge]
+                    default: Owner
+              refreshInterval:
+                type: string
+                default: 1h
+              openbaoRef:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  namespace:
+                    type: string
+                  authMethod:
+                    type: string
+                    default: kubernetes
+                  authMountPath:
+                    type: string
+              roleName:
+                type: string
+              secretArgs:
+                type: object
+                additionalProperties:
+                  type: string
+              suspendSync:
+                type: boolean
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              lastSyncTime:
+                type: string
+                format: date-time
+              secretVersion:
+                type: string
+              syncedSecretName:
+                type: string
+              syncedSecretNamespace:
+                type: string
+              observedGeneration:
+                type: integer
+                format: int64
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: baopolicies.kubebao.io
+  labels:
+    {{- include "kubebao.labels" . | nindent 4 }}
+spec:
+  group: kubebao.io
+  names:
+    kind: BaoPolicy
+    listKind: BaoPolicyList
+    plural: baopolicies
+    singular: baopolicy
+    shortNames:
+      - bp
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.appliedPolicyName
+      name: Policy Name
+      type: string
+    - jsonPath: .status.lastSyncTime
+      name: Last Sync
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required:
+              - rules
+            properties:
+              policyName:
+                type: string
+              rules:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required:
+                    - path
+                    - capabilities
+                  properties:
+                    path:
+                      type: string
+                    capabilities:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: string
+                        enum: [create, read, update, delete, list, sudo, deny, patch]
+                    allowedParameters:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items:
+                          type: string
+                    deniedParameters:
+                      type: array
+                      items:
+                        type: string
+                    requiredParameters:
+                      type: array
+                      items:
+                        type: string
+              openbaoRef:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  namespace:
+                    type: string
+                  authMethod:
+                    type: string
+                    default: kubernetes
+                  authMountPath:
+                    type: string
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              lastSyncTime:
+                type: string
+                format: date-time
+              policyVersion:
+                type: string
+              appliedPolicyName:
+                type: string
+              observedGeneration:
+                type: integer
+                format: int64
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}

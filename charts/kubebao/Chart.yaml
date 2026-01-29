@@ -1,0 +1,27 @@
+apiVersion: v2
+name: kubebao
+description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - secrets
+  - openbao
+  - vault
+  - kms
+  - csi
+  - encryption
+home: https://github.com/kubebao/kubebao
+sources:
+  - https://github.com/kubebao/kubebao
+maintainers:
+  - name: KubeBao Authors
+    email: maintainers@kubebao.io
+# Note: secrets-store-csi-driver должен быть установлен отдельно
+# helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver -n kubebao-system
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Full Lifecycle

@@ -1,0 +1,236 @@
+# KubeBao Helm Chart Values
+
+# Global settings
+global:
+  # OpenBao connection settings
+  openbao:
+    # Address of the OpenBao server (REQUIRED)
+    # Example: "http://openbao.openbao.svc.cluster.local:8200"
+    address: "http://openbao.openbao.svc.cluster.local:8200"
+    # Authentication method (kubernetes, token)
+    authMethod: kubernetes
+    # Role for Kubernetes authentication
+    role: kubebao
+    # Namespace in OpenBao (enterprise feature)
+    namespace: ""
+    # TLS configuration
+    tls:
+      enabled: false
+      # CA certificate (can be a secret reference)
+      caCert: ""
+      # Skip TLS verification (not recommended for production)
+      insecure: false
+  
+  # Image settings
+  image:
+    # Container registry (e.g., ghcr.io/your-username)
+    registry: ghcr.io/kubebao
+    pullPolicy: IfNotPresent
+    # Overrides the image tag whose default is the chart appVersion
+    tag: ""
+  
+  # Image pull secrets (for private registries)
+  imagePullSecrets: []
+  # - name: ghcr-secret
+
+# KMS Plugin settings
+kms:
+  enabled: true
+  
+  # Name of the KMS deployment
+  name: kubebao-kms
+  
+  # Number of replicas (typically 1 per control plane node)
+  replicaCount: 1
+  
+  image:
+    repository: kubebao/kubebao-kms
+    # tag: "" # Defaults to appVersion
+  
+  # Socket path for KMS plugin
+  socketPath: /var/run/kubebao/kms.sock
+  
+  # Transit key configuration
+  transit:
+    # Key name in OpenBao Transit
+    keyName: kubebao-kms
+    # Mount path for Transit secrets engine
+    mountPath: transit
+  
+  # Resources
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations for control plane nodes
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+  
+  # Pod security context (allow root for initContainer)
+  securityContext:
+    fsGroup: 10123
+  
+  # Container security context
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10123
+    runAsGroup: 10123
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# CSI Provider settings
+csi:
+  enabled: true
+  
+  # Name of the CSI provider deployment
+  name: kubebao-csi
+  
+  image:
+    repository: kubebao/kubebao-csi
+    # tag: "" # Defaults to appVersion
+  
+  # Socket path for CSI provider
+  socketPath: /provider/kubebao.sock
+  
+  # Install secrets-store-csi-driver as dependency
+  driver:
+    install: false
+  
+  # Cache TTL for secrets
+  cacheTTL: 5m
+  
+  # Enable secret rotation
+  enableSecretRotation: true
+  rotationPollInterval: 2m
+  
+  # Resources
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Pod security context (allow root for initContainer)
+  securityContext:
+    fsGroup: 10123
+  
+  # Container security context
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10123
+    runAsGroup: 10123
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# Operator settings
+operator:
+  enabled: true
+  
+  # Name of the operator deployment
+  name: kubebao-operator
+  
+  # Number of replicas
+  replicaCount: 1
+  
+  image:
+    repository: kubebao/kubebao-operator
+    # tag: "" # Defaults to appVersion
+  
+  # Leader election settings
+  leaderElection:
+    enabled: true
+    namespace: ""  # Defaults to release namespace
+  
+  # Metrics configuration
+  metrics:
+    enabled: true
+    port: 8080
+  
+  # Health probe configuration
+  healthProbe:
+    port: 8081
+  
+  # Resources
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10123
+    runAsGroup: 10123
+    fsGroup: 10123
+  
+  # Container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# Service account settings
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use
+  name: kubebao
+  # Annotations to add to the service account
+  annotations: {}
+
+# RBAC settings
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+
+# Extra environment variables for all components
+extraEnv: []
+
+# Extra volumes for all components
+extraVolumes: []
+
+# Extra volume mounts for all components
+extraVolumeMounts: []
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}

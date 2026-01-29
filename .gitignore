@@ -1,0 +1,73 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Helm
+charts/*/charts/
+charts/*/*.lock
+
+# Build
+.deploy/
+dist/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.envrc
+
+# Temporary files
+tmp/
+temp/
+
+# Test artifacts
+testbin/
+cover.out
+
+# Generated files
+*_generated.go
+zz_generated.*
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Secrets (never commit these!)
+secrets/
+credentials.json
+service-account.json
