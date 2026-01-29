@@ -57,10 +57,6 @@ temp/
 testbin/
 cover.out
 
-# Generated files
-*_generated.go
-zz_generated.*
-
 # Certificates
 *.pem
 *.key
