@@ -152,6 +152,11 @@ csi:
 operator:
   enabled: true
   
+  # CRD installation
+  crds:
+    # Install CRDs with the chart
+    install: true
+  
   # Name of the operator deployment
   name: kubebao-operator
   

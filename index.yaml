@@ -1,0 +1,33 @@
+apiVersion: v1
+entries:
+  kubebao:
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+      artifacthub.io/operatorCapabilities: Full Lifecycle
+    apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-01-29T19:00:26.167573+03:00"
+    description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
+    digest: 50e2bef946869f1232f78dba8555f64540cd6b31e6693829c484034fdf13c172
+    home: https://github.com/kubebao/kubebao
+    keywords:
+    - kubernetes
+    - secrets
+    - openbao
+    - vault
+    - kms
+    - csi
+    - encryption
+    maintainers:
+    - email: maintainers@kubebao.io
+      name: KubeBao Authors
+    name: kubebao
+    sources:
+    - https://github.com/kubebao/kubebao
+    type: application
+    urls:
+    - https://assasinnik.github.io/kubebao/kubebao-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-01-29T19:00:26.166546+03:00"
