@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -81,7 +82,7 @@ func (f *SecretsFetcher) FetchSecrets(ctx context.Context, client *Authenticated
 		for _, err := range fetchErrors {
 			errMsg += "\n  - " + err.Error()
 		}
-		return secrets, fmt.Errorf(errMsg)
+		return secrets, errors.New(errMsg)
 	}
 
 	return secrets, nil
@@ -141,7 +142,7 @@ func (f *SecretsFetcher) readFromOpenBao(ctx context.Context, client *Authentica
 	var secret interface{}
 	var version string
 
-	if obj.SecretArgs != nil && len(obj.SecretArgs) > 0 {
+	if len(obj.SecretArgs) > 0 {
 		// Write request for dynamic secrets (database, pki, etc.)
 		data := make(map[string]interface{})
 		for k, v := range obj.SecretArgs {
@@ -270,37 +271,3 @@ func (c *secretsCache) set(key string, secret *FetchedSecret) {
 	}
 }
 
-// clear clears the cache
-func (c *secretsCache) clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.entries = make(map[string]*cacheEntry)
-}
-
-// cleanup removes expired entries from the cache
-func (c *secretsCache) cleanup() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	now := time.Now()
-	for key, entry := range c.entries {
-		if now.After(entry.expiresAt) {
-			delete(c.entries, key)
-		}
-	}
-}
-
-// isKVv2Path determines if a path is likely a KV v2 path
-func isKVv2Path(path string) bool {
-	// Common KV v2 mount prefixes
-	kvv2Prefixes := []string{"secret/", "kv/"}
-
-	for _, prefix := range kvv2Prefixes {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-
-	return false
-}

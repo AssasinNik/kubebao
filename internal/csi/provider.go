@@ -347,7 +347,7 @@ func parseFilePermission(perm string) int32 {
 	perm = strings.TrimPrefix(perm, "0")
 
 	var mode int32
-	fmt.Sscanf(perm, "%o", &mode)
+	_, _ = fmt.Sscanf(perm, "%o", &mode)
 	if mode == 0 {
 		return 0644
 	}

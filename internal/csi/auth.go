@@ -18,7 +18,6 @@ package csi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -292,22 +291,3 @@ func (c *AuthenticatedClient) GetClient() *api.Client {
 	return c.client
 }
 
-// parseServiceAccountTokens parses the service account tokens from CSI request
-func parseServiceAccountTokens(tokensJSON string) (map[string]TokenReview, error) {
-	if tokensJSON == "" {
-		return nil, nil
-	}
-
-	var tokens map[string]TokenReview
-	if err := json.Unmarshal([]byte(tokensJSON), &tokens); err != nil {
-		return nil, fmt.Errorf("failed to parse service account tokens: %w", err)
-	}
-
-	return tokens, nil
-}
-
-// TokenReview represents a Kubernetes token review
-type TokenReview struct {
-	Token               string `json:"token"`
-	ExpirationTimestamp string `json:"expirationTimestamp"`
-}
