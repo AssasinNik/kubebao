@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific License governing permissions and
-limitations under the License.
-*/
-
+// Менеджер ключей Kuznyechik — хранение в OpenBao KV.
 package kms
 
 import (
@@ -72,7 +57,7 @@ func NewKeyManager(client *openbao.Client, kvPathPrefix, keyName string, createI
 	}, nil
 }
 
-// GetOrCreateKey retrieves the encryption key from OpenBao KV, creating it if necessary
+// GetOrCreateKey — читает ключ из OpenBao KV. Если ключа нет и createIfNotExists — генерирует 256 бит и сохраняет.
 func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 	km.mu.RLock()
 	if km.cachedKey != nil {
@@ -113,7 +98,7 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 		return nil, 0, fmt.Errorf("key not found and createKeyIfNotExists is false")
 	}
 
-	km.logger.Info("creating new Kuznyechik key in OpenBao KV", "path", km.kvPath)
+	km.logger.Info("Создание нового ключа Kuznyechik в OpenBao KV", "path", km.kvPath)
 
 	// Generate 256-bit key
 	key := make([]byte, crypto.KuznyechikKeySize)
@@ -139,7 +124,7 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 	return keyCopy, 1, nil
 }
 
-// parseKeyData parses key data from OpenBao KV response
+// parseKeyData — разбирает ответ KV: base64(key), version.
 func (km *KeyManager) parseKeyData(data map[string]interface{}) ([]byte, int, error) {
 	keyB64, ok := data["key"].(string)
 	if !ok {

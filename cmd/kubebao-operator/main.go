@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Kubebao Operator — контроллер для синхронизации BaoSecret и BaoPolicy с OpenBao.
 package main
 
 import (
@@ -86,21 +71,23 @@ func main() {
 	}
 	ctrl.SetLogger(zapr.NewLogger(zapLog))
 
-	setupLog.Info("starting kubebao-operator", "version", Version)
+	setupLog.Info("Запуск kubebao-operator", "version", Version)
 
-	// Load OpenBao configuration
+	// Загрузка конфигурации OpenBao
 	var baoConfig *openbao.Config
 	if configFile != "" {
 		baoConfig, err = openbao.LoadConfig(configFile)
 		if err != nil {
-			setupLog.Error(err, "failed to load OpenBao config from file")
+			setupLog.Error(err, "Ошибка загрузки конфигурации OpenBao из файла")
 			os.Exit(1)
 		}
+		setupLog.Info("Конфигурация OpenBao загружена из файла", "path", configFile)
 	} else {
 		baoConfig = openbao.LoadConfigFromEnv()
+		setupLog.Info("Конфигурация OpenBao загружена из переменных окружения")
 	}
 
-	// Create OpenBao client
+	// Создание клиента OpenBao
 	hcLogger := hclog.New(&hclog.LoggerOptions{
 		Name:  "openbao",
 		Level: hclog.LevelFromString(logLevel),
@@ -110,16 +97,15 @@ func main() {
 	if baoConfig.Address != "" {
 		baoClient, err = openbao.NewClient(baoConfig, hcLogger)
 		if err != nil {
-			setupLog.Error(err, "failed to create OpenBao client")
-			// Continue without client - controllers will fail gracefully
+			setupLog.Error(err, "Ошибка создания клиента OpenBao (контроллеры будут работать без подключения)")
 		} else {
-			setupLog.Info("connected to OpenBao", "address", baoConfig.Address)
+			setupLog.Info("Успешное подключение к OpenBao", "address", baoConfig.Address)
 		}
 	} else {
-		setupLog.Info("OpenBao address not configured, skipping client initialization")
+		setupLog.Info("Адрес OpenBao не задан, инициализация клиента пропущена")
 	}
 
-	// Create manager
+	// Создание менеджера контроллеров
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
@@ -127,45 +113,50 @@ func main() {
 		LeaderElectionID:       "kubebao-operator.kubebao.io",
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to create manager")
+		setupLog.Error(err, "Ошибка создания менеджера контроллеров")
 		os.Exit(1)
 	}
+	setupLog.Info("Менеджер контроллеров создан")
 
-	// Setup BaoSecret controller
+	// Регистрация контроллера BaoSecret
 	if err := (&controller.BaoSecretReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		Log:           ctrl.Log.WithName("controllers").WithName("BaoSecret"),
 		OpenBaoClient: baoClient,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "BaoSecret")
+		setupLog.Error(err, "Ошибка регистрации контроллера BaoSecret")
 		os.Exit(1)
 	}
+	setupLog.Info("Контроллер BaoSecret зарегистрирован")
 
-	// Setup BaoPolicy controller
+	// Регистрация контроллера BaoPolicy
 	if err := (&controller.BaoPolicyReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		Log:           ctrl.Log.WithName("controllers").WithName("BaoPolicy"),
 		OpenBaoClient: baoClient,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "BaoPolicy")
+		setupLog.Error(err, "Ошибка регистрации контроллера BaoPolicy")
 		os.Exit(1)
 	}
+	setupLog.Info("Контроллер BaoPolicy зарегистрирован")
 
-	// Add health check
+	// Настройка проверок здоровья
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		setupLog.Error(err, "Ошибка настройки health check")
 		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		setupLog.Error(err, "Ошибка настройки readyz check")
 		os.Exit(1)
 	}
+	setupLog.Info("Проверки здоровья настроены")
 
-	setupLog.Info("starting manager")
+	setupLog.Info("Запуск менеджера контроллеров")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "Ошибка при работе менеджера")
 		os.Exit(1)
 	}
+	setupLog.Info("Менеджер остановлен")
 }

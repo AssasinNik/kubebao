@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Kubebao CSI — провайдер Secrets Store CSI Driver для инъекции секретов из OpenBao в поды.
 package main
 
 import (
@@ -64,38 +49,41 @@ func main() {
 
 	logger := hclog.New(loggerOpts)
 
-	logger.Info("starting kubebao-csi", "version", Version)
+	logger.Info("Запуск kubebao-csi", "version", Version)
 
-	// Load configuration
+	// Загрузка конфигурации
 	var config *csi.Config
 	var err error
 
 	if configFile != "" {
-		logger.Info("loading configuration from file", "path", configFile)
+		logger.Info("Загрузка конфигурации из файла", "path", configFile)
 		config, err = csi.LoadConfig(configFile)
 		if err != nil {
-			logger.Error("failed to load configuration", "error", err)
+			logger.Error("Ошибка загрузки конфигурации", "error", err)
 			os.Exit(1)
 		}
+		logger.Info("Конфигурация CSI загружена из файла")
 	} else {
-		logger.Info("loading configuration from environment variables")
+		logger.Info("Загрузка конфигурации из переменных окружения")
 		config = csi.LoadConfigFromEnv()
 	}
 
-	// Validate configuration
+	// Проверка конфигурации
 	if err := config.Validate(); err != nil {
-		logger.Error("invalid configuration", "error", err)
+		logger.Error("Неверная конфигурация", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("Конфигурация CSI проверена успешно", "socket", config.SocketPath)
 
-	// Create CSI provider
+	// Создание CSI провайдера
 	provider, err := csi.NewProvider(config, logger)
 	if err != nil {
-		logger.Error("failed to create CSI provider", "error", err)
+		logger.Error("Ошибка создания CSI провайдера", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("CSI провайдер создан успешно")
 
-	// Setup context with signal handling
+	// Обработка сигналов завершения
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -105,15 +93,15 @@ func main() {
 
 	go func() {
 		sig := <-sigChan
-		logger.Info("received signal, shutting down", "signal", sig)
+		logger.Info("Получен сигнал завершения, остановка провайдера", "signal", sig)
 		cancel()
 	}()
 
-	// Run the provider
+	// Запуск CSI провайдера
 	if err := provider.Run(ctx); err != nil {
-		logger.Error("CSI provider error", "error", err)
+		logger.Error("Ошибка CSI провайдера", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("kubebao-csi stopped")
+	logger.Info("kubebao-csi остановлен")
 }

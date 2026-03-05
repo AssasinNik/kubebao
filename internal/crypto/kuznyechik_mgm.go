@@ -1,21 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific License governing permissions and
-limitations under the License.
-*/
-
-// Package crypto provides GOST R 34.12-2015 (Kuznyechik) encryption.
-// Uses Encrypt-then-MAC: Kuznyechik-CTR + HMAC-SHA256 for authenticated encryption.
+// Пакет crypto — шифрование GOST R 34.12-2015 (Kuznyechik), Encrypt-then-MAC.
 package crypto
 
 import (
@@ -32,16 +15,11 @@ import (
 )
 
 const (
-	// KuznyechikKeySize is the key size for Kuznyechik (256 bits)
-	KuznyechikKeySize = 32
-	// BlockSize is Kuznyechik block size (128 bits)
-	BlockSize = 16
-	// NonceSize is the size of the nonce for CTR mode
-	NonceSize = BlockSize
-	// AuthTagSize is HMAC-SHA256 output size
-	AuthTagSize = 32
-	// HeaderSize is nonce + auth tag
-	HeaderSize = NonceSize + AuthTagSize
+	KuznyechikKeySize = 32  // Размер ключа Kuznyechik — 256 бит (GOST R 34.12-2015)
+	BlockSize         = 16  // Размер блока — 128 бит
+	NonceSize         = 16  // Размер nonce для CTR (равен BlockSize)
+	AuthTagSize       = 32  // HMAC-SHA256 — 32 байта
+	HeaderSize        = 48  // nonce(16) + auth_tag(32) в начале ciphertext
 )
 
 var (
@@ -50,17 +28,14 @@ var (
 	ErrAuthFailed      = errors.New("kuznyechik: authentication failed")
 )
 
-// KuznyechikAEAD provides authenticated encryption using Kuznyechik in CTR mode
-// with HMAC-SHA256 for authentication (Encrypt-then-MAC).
-// Format: nonce(16) || ciphertext || hmac(nonce||ciphertext)
+// KuznyechikAEAD — AEAD на базе Kuznyechik-CTR + HMAC-SHA256 (Encrypt-then-MAC).
+// Формат ciphertext: nonce(16) || ciphertext || hmac(nonce||ciphertext)
 type KuznyechikAEAD struct {
 	encKey []byte // 32 bytes for encryption
 	macKey []byte // 32 bytes for HMAC (derived from same KEK)
 }
 
-// NewKuznyechikAEAD creates a new AEAD instance.
-// Key must be 32 bytes (256 bits) for Kuznyechik.
-// The key is split: first 16 bytes used for MAC key derivation, rest for encryption.
+// NewKuznyechikAEAD — создаёт AEAD. Ключ 32 байта. MAC-ключ получается из SHA256(key||"mac").
 func NewKuznyechikAEAD(key []byte) (*KuznyechikAEAD, error) {
 	if len(key) != KuznyechikKeySize {
 		return nil, ErrInvalidKeySize
@@ -76,8 +51,7 @@ func NewKuznyechikAEAD(key []byte) (*KuznyechikAEAD, error) {
 	}, nil
 }
 
-// ctrXORKeyStream implements CTR mode manually because kuznyechik.Encrypt
-// requires exactly 16-byte dst/src, which standard cipher.CTR may not satisfy.
+// ctrXORKeyStream — ручная реализация CTR, т.к. Kuznyechik encrypt только 16-байтовыми блоками.
 func ctrXORKeyStream(block cipher.Block, dst, src, iv []byte) {
 	counter := make([]byte, BlockSize)
 	copy(counter, iv)

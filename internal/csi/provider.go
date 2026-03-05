@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// CSI провайдер — монтирование секретов из OpenBao в поды через Secrets Store CSI.
 package csi
 
 import (
@@ -69,7 +54,7 @@ func NewProvider(config *Config, logger hclog.Logger) (*Provider, error) {
 	}, nil
 }
 
-// MountParams holds the parsed mount parameters from SecretProviderClass
+// MountParams — параметры из SecretProviderClass (roleName, openbaoAddr, objects и т.д.)
 type MountParams struct {
 	RoleName       string         `yaml:"roleName" json:"roleName"`
 	OpenBaoAddress string         `yaml:"openbaoAddr" json:"openbaoAddr"`
@@ -80,7 +65,7 @@ type MountParams struct {
 	Audience       string         `yaml:"audience" json:"audience"`
 }
 
-// SecretObject represents a secret to be fetched
+// SecretObject — описание секрета: путь в OpenBao, ключ, encoding, права на файл
 type SecretObject struct {
 	ObjectName     string            `yaml:"objectName" json:"objectName"`
 	SecretPath     string            `yaml:"secretPath" json:"secretPath"`
@@ -100,7 +85,7 @@ type FetchedSecret struct {
 
 // Version implements CSIDriverProviderServer
 func (p *Provider) Version(ctx context.Context, req *pb.VersionRequest) (*pb.VersionResponse, error) {
-	p.logger.Debug("version request received", "clientVersion", req.GetVersion())
+	p.logger.Debug("Запрос версии", "clientVersion", req.GetVersion())
 	return &pb.VersionResponse{
 		Version:        "v1alpha1",
 		RuntimeName:    ProviderName,
@@ -110,13 +95,13 @@ func (p *Provider) Version(ctx context.Context, req *pb.VersionRequest) (*pb.Ver
 
 // Mount implements CSIDriverProviderServer
 func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountResponse, error) {
-	p.logger.Info("mount request received", "targetPath", req.GetTargetPath())
+	p.logger.Info("Запрос монтирования", "targetPath", req.GetTargetPath())
 
 	// Parse attributes (SecretProviderClass parameters)
 	var attribs map[string]string
 	if req.GetAttributes() != "" {
 		if err := json.Unmarshal([]byte(req.GetAttributes()), &attribs); err != nil {
-			p.logger.Error("failed to parse attributes", "error", err)
+			p.logger.Error("Ошибка разбора атрибутов", "error", err)
 			return &pb.MountResponse{
 				Error: &pb.Error{Code: "InvalidArgument"},
 			}, nil
@@ -126,7 +111,7 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 	// Parse mount parameters
 	params, err := p.parseMountParams(attribs)
 	if err != nil {
-		p.logger.Error("failed to parse mount parameters", "error", err)
+		p.logger.Error("Ошибка разбора параметров монтирования", "error", err)
 		return &pb.MountResponse{
 			Error: &pb.Error{Code: "InvalidArgument"},
 		}, nil
@@ -136,14 +121,14 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 	var secrets map[string]string
 	if req.GetSecrets() != "" {
 		if err := json.Unmarshal([]byte(req.GetSecrets()), &secrets); err != nil {
-			p.logger.Warn("failed to parse secrets", "error", err)
+			p.logger.Warn("Ошибка разбора секретов", "error", err)
 		}
 	}
 
 	// Authenticate to OpenBao
 	authClient, err := p.authenticate(ctx, params, secrets)
 	if err != nil {
-		p.logger.Error("authentication failed", "error", err)
+		p.logger.Error("Ошибка аутентификации OpenBao", "error", err)
 		return &pb.MountResponse{
 			Error: &pb.Error{Code: "PermissionDenied"},
 		}, nil
@@ -152,7 +137,7 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 	// Fetch secrets from OpenBao
 	fetchedSecrets, err := p.secretsFetcher.FetchSecrets(ctx, authClient, params.Objects)
 	if err != nil {
-		p.logger.Error("failed to fetch secrets", "error", err)
+		p.logger.Error("Ошибка получения секретов из OpenBao", "error", err)
 		return &pb.MountResponse{
 			Error: &pb.Error{Code: "Internal"},
 		}, nil
@@ -175,7 +160,7 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 		})
 	}
 
-	p.logger.Info("mount successful", "filesCount", len(files))
+	p.logger.Info("Монтирование выполнено успешно", "filesCount", len(files), "targetPath", req.GetTargetPath())
 
 	return &pb.MountResponse{
 		ObjectVersion: objectVersions,
@@ -183,7 +168,7 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 	}, nil
 }
 
-// parseMountParams parses the mount request parameters
+// parseMountParams — разбирает attributes из MountRequest (YAML/JSON objects, roleName, openbaoAddr)
 func (p *Provider) parseMountParams(attribs map[string]string) (*MountParams, error) {
 	params := &MountParams{
 		AuthMethod:    p.config.DefaultAuthMethod,
@@ -245,7 +230,7 @@ func (p *Provider) parseMountParams(attribs map[string]string) (*MountParams, er
 	return params, nil
 }
 
-// authenticate performs authentication to OpenBao
+// authenticate — создаёт AuthenticatedClient с JWT из ServiceAccount или secrets
 func (p *Provider) authenticate(ctx context.Context, params *MountParams, secrets map[string]string) (*AuthenticatedClient, error) {
 	authConfig := &AuthConfig{
 		OpenBaoAddress: params.OpenBaoAddress,
@@ -310,7 +295,7 @@ func (p *Provider) Run(ctx context.Context) error {
 	// Register CSI provider service
 	pb.RegisterCSIDriverProviderServer(p.server, p)
 
-	p.logger.Info("CSI provider starting", "socket", p.config.SocketPath)
+	p.logger.Info("Запуск CSI провайдера", "socket", p.config.SocketPath)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -325,10 +310,10 @@ func (p *Provider) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		p.logger.Info("shutting down CSI provider (context)")
+		p.logger.Info("Остановка CSI провайдера (контекст отменён)")
 		p.server.GracefulStop()
 	case sig := <-sigChan:
-		p.logger.Info("shutting down CSI provider", "signal", sig)
+		p.logger.Info("Остановка CSI провайдера", "signal", sig)
 		p.server.GracefulStop()
 	case err := <-errChan:
 		return err
@@ -337,7 +322,7 @@ func (p *Provider) Run(ctx context.Context) error {
 	return nil
 }
 
-// parseFilePermission parses file permission string to int32
+// parseFilePermission — преобразует "0644" в int32 для mode файла
 func parseFilePermission(perm string) int32 {
 	if perm == "" {
 		return 0644

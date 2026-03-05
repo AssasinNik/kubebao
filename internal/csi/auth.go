@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Аутентификация OpenBao — Kubernetes, JWT, токен.
 package csi
 
 import (
@@ -27,7 +12,7 @@ import (
 	"github.com/openbao/openbao/api/v2"
 )
 
-// AuthConfig holds authentication configuration
+// AuthConfig — адрес OpenBao, метод (kubernetes/jwt/token), роль, JWT
 type AuthConfig struct {
 	// OpenBaoAddress is the address of the OpenBao server
 	OpenBaoAddress string
@@ -64,7 +49,7 @@ type TLSConfig struct {
 	Insecure      bool
 }
 
-// AuthenticatedClient wraps an authenticated OpenBao client
+// AuthenticatedClient — OpenBao api.Client с установленным токеном и RefreshToken при истечении
 type AuthenticatedClient struct {
 	client      *api.Client
 	config      *AuthConfig
@@ -184,7 +169,7 @@ func (c *AuthenticatedClient) authenticateKubernetes(ctx context.Context) error 
 		c.mu.Unlock()
 	}
 
-	c.logger.Debug("kubernetes authentication successful", "role", c.config.Role)
+	c.logger.Debug("Kubernetes аутентификация успешна", "role", c.config.Role)
 	return nil
 }
 
@@ -224,7 +209,7 @@ func (c *AuthenticatedClient) authenticateJWT(ctx context.Context) error {
 		c.mu.Unlock()
 	}
 
-	c.logger.Debug("jwt authentication successful", "role", c.config.Role)
+	c.logger.Debug("JWT аутентификация успешна", "role", c.config.Role)
 	return nil
 }
 

@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Получение секретов из OpenBao — кэширование, KV v2, динамические секреты.
 package csi
 
 import (
@@ -29,7 +14,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
-// SecretsFetcher handles fetching secrets from OpenBao
+// SecretsFetcher — получает секреты из OpenBao с кэшированием по CacheTTL
 type SecretsFetcher struct {
 	config *Config
 	logger hclog.Logger
@@ -93,11 +78,11 @@ func (f *SecretsFetcher) fetchSecret(ctx context.Context, client *AuthenticatedC
 	// Check cache first
 	cacheKey := f.cacheKey(obj)
 	if cached := f.cache.get(cacheKey); cached != nil {
-		f.logger.Debug("cache hit", "objectName", obj.ObjectName)
+		f.logger.Debug("Попадание в кэш секретов", "objectName", obj.ObjectName)
 		return cached, nil
 	}
 
-	f.logger.Debug("fetching secret", "objectName", obj.ObjectName, "path", obj.SecretPath)
+	f.logger.Debug("Получение секрета из OpenBao", "objectName", obj.ObjectName, "path", obj.SecretPath)
 
 	// Determine the secret engine type from path
 	secret, version, err := f.readFromOpenBao(ctx, client, obj)
@@ -121,7 +106,7 @@ func (f *SecretsFetcher) fetchSecret(ctx context.Context, client *AuthenticatedC
 	return fetchedSecret, nil
 }
 
-// readFromOpenBao reads a secret from OpenBao
+// readFromOpenBao — читает секрет по path. Поддерживает KV v2 и динамические секреты (SecretArgs для write).
 func (f *SecretsFetcher) readFromOpenBao(ctx context.Context, client *AuthenticatedClient, obj SecretObject) ([]byte, string, error) {
 	path := obj.SecretPath
 
@@ -198,7 +183,7 @@ func (f *SecretsFetcher) readFromOpenBao(ctx context.Context, client *Authentica
 	return content, version, nil
 }
 
-// extractContent extracts content from the secret data
+// extractContent — извлекает SecretKey или весь JSON, применяет encoding (base64/text).
 func (f *SecretsFetcher) extractContent(data interface{}, obj SecretObject) ([]byte, error) {
 	dataMap, ok := data.(map[string]interface{})
 	if !ok {
@@ -238,7 +223,7 @@ func (f *SecretsFetcher) extractContent(data interface{}, obj SecretObject) ([]b
 	return content, nil
 }
 
-// cacheKey generates a cache key for a secret object
+// cacheKey — ключ кэша: secretPath:secretKey:objectName
 func (f *SecretsFetcher) cacheKey(obj SecretObject) string {
 	return fmt.Sprintf("%s:%s:%s", obj.SecretPath, obj.SecretKey, obj.ObjectName)
 }

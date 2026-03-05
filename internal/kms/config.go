@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Конфигурация KMS — сокет, ключ, провайдер (transit/kuznyechik).
 package kms
 
 import (
@@ -31,32 +16,23 @@ const (
 	ProviderKuznyechik = "kuznyechik"
 )
 
-// Config holds the KMS plugin configuration
+// Config — конфигурация KMS-плагина.
 type Config struct {
-	// SocketPath is the path to the Unix socket for the KMS plugin
-	SocketPath string `yaml:"socketPath"`
+	SocketPath string `yaml:"socketPath"` // Unix socket для gRPC (например /var/run/kubebao/kms.sock)
 
-	// KeyName is the name of the key to use for encryption
-	KeyName string `yaml:"keyName"`
+	KeyName string `yaml:"keyName"` // Имя ключа в Transit или путь в KV (для Kuznyechik)
 
-	// KeyType is the type of key to create if it doesn't exist
-	// Supported types: aes128-gcm96, aes256-gcm96, chacha20-poly1305 (transit), kuznyechik (local)
-	KeyType string `yaml:"keyType"`
+	KeyType string `yaml:"keyType"` // aes256-gcm96, aes128-gcm96, chacha20-poly1305 (Transit), kuznyechik
 
-	// EncryptionProvider specifies which backend to use: "transit" (OpenBao Transit) or "kuznyechik" (local GOST)
-	EncryptionProvider string `yaml:"encryptionProvider"`
+	EncryptionProvider string `yaml:"encryptionProvider"` // "transit" или "kuznyechik"
 
-	// KVPathPrefix is the path prefix for keys in OpenBao KV (used by kuznyechik provider)
-	KVPathPrefix string `yaml:"kvPathPrefix"`
+	KVPathPrefix string `yaml:"kvPathPrefix"` // Префикс в KV для хранения ключей Kuznyechik (например kubebao/kms-keys)
 
-	// CreateKeyIfNotExists creates the key if it doesn't exist
-	CreateKeyIfNotExists bool `yaml:"createKeyIfNotExists"`
+	CreateKeyIfNotExists bool `yaml:"createKeyIfNotExists"` // Создавать ключ при первом Encrypt, если не существует
 
-	// HealthCheckInterval is the interval for health checks
-	HealthCheckInterval time.Duration `yaml:"healthCheckInterval"`
+	HealthCheckInterval time.Duration `yaml:"healthCheckInterval"` // Интервал проверки доступности ключа
 
-	// OpenBao configuration
-	OpenBao *openbao.Config `yaml:"openbao"`
+	OpenBao *openbao.Config `yaml:"openbao"` // Адрес, токен, TLS для OpenBao
 }
 
 // LoadConfig loads the KMS configuration from a YAML file

@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Клиент OpenBao — KV, Transit, аутентификация Kubernetes.
 package openbao
 
 import (
@@ -28,37 +13,28 @@ import (
 	"github.com/openbao/openbao/api/v2"
 )
 
-// Config holds the configuration for the OpenBao client
+// Config — конфигурация клиента OpenBao.
 type Config struct {
-	// Address is the address of the OpenBao server
-	Address string `yaml:"address"`
+	Address string `yaml:"address"` // URL сервера OpenBao (например http://openbao:8200)
 
-	// Token is the authentication token (optional, can use other auth methods)
-	Token string `yaml:"token"`
+	Token string `yaml:"token"` // Root/статический токен (если не используется Kubernetes auth)
 
-	// TLSConfig holds TLS configuration
-	TLSConfig *TLSConfig `yaml:"tls,omitempty"`
+	TLSConfig *TLSConfig `yaml:"tls,omitempty"` // Сертификаты, CA, небезопасный режим
 
-	// Kubernetes auth configuration
-	KubernetesAuth *KubernetesAuthConfig `yaml:"kubernetesAuth,omitempty"`
+	KubernetesAuth *KubernetesAuthConfig `yaml:"kubernetesAuth,omitempty"` // Роль, mount path, путь к JWT
 
-	// TransitMount is the mount path for transit secrets engine
-	TransitMount string `yaml:"transitMount"`
+	TransitMount string `yaml:"transitMount"` // Путь к Transit engine (по умолчанию "transit")
 
-	// KVMount is the mount path for KV secrets engine
-	KVMount string `yaml:"kvMount"`
+	KVMount string `yaml:"kvMount"` // Путь к KV v2 (по умолчанию "secret")
 
-	// Namespace is the OpenBao namespace (enterprise feature)
-	Namespace string `yaml:"namespace,omitempty"`
+	Namespace string `yaml:"namespace,omitempty"` // Namespace OpenBao (Enterprise)
 
-	// MaxRetries is the maximum number of retries for API calls
-	MaxRetries int `yaml:"maxRetries"`
+	MaxRetries int `yaml:"maxRetries"` // Повторы при сетевых ошибках
 
-	// Timeout for API calls
-	Timeout time.Duration `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"` // Таймаут HTTP-запросов
 }
 
-// TLSConfig holds TLS configuration
+// TLSConfig — параметры TLS для HTTPS.
 type TLSConfig struct {
 	CACert        string `yaml:"caCert"`
 	CAPath        string `yaml:"caPath"`
@@ -68,19 +44,14 @@ type TLSConfig struct {
 	Insecure      bool   `yaml:"insecure"`
 }
 
-// KubernetesAuthConfig holds Kubernetes authentication configuration
+// KubernetesAuthConfig — параметры Kubernetes auth (JWT из ServiceAccount).
 type KubernetesAuthConfig struct {
-	// Role is the OpenBao role to authenticate as
-	Role string `yaml:"role"`
-
-	// MountPath is the mount path for the Kubernetes auth method
-	MountPath string `yaml:"mountPath"`
-
-	// TokenPath is the path to the service account token
-	TokenPath string `yaml:"tokenPath"`
+	Role      string `yaml:"role"`      // Роль OpenBao для входа
+	MountPath string `yaml:"mountPath"`  // Путь auth (по умолчанию "kubernetes")
+	TokenPath string `yaml:"tokenPath"`  // Путь к файлу JWT (обычно /var/run/secrets/.../token)
 }
 
-// Client wraps the OpenBao API client with additional functionality
+// Client — обёртка над api.Client с автоматическим обновлением токена и методами KV/Transit.
 type Client struct {
 	client     *api.Client
 	config     *Config
@@ -89,7 +60,7 @@ type Client struct {
 	tokenExpiry time.Time
 }
 
-// NewClient creates a new OpenBao client
+// NewClient — создаёт клиент, подключается к OpenBao и выполняет аутентификацию.
 func NewClient(cfg *Config, logger hclog.Logger) (*Client, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -159,7 +130,7 @@ func NewClient(cfg *Config, logger hclog.Logger) (*Client, error) {
 	return c, nil
 }
 
-// authenticate performs authentication to OpenBao
+// authenticate — выбирает метод аутентификации: токен из конфига, Kubernetes auth, env (OPENBAO_TOKEN/VAULT_TOKEN).
 func (c *Client) authenticate() error {
 	// If token is provided directly, use it
 	if c.config.Token != "" {
@@ -187,7 +158,7 @@ func (c *Client) authenticate() error {
 	return fmt.Errorf("no authentication method configured")
 }
 
-// authenticateKubernetes performs Kubernetes authentication
+// authenticateKubernetes — читает JWT из TokenPath, отправляет auth/kubernetes/login, сохраняет ClientToken.
 func (c *Client) authenticateKubernetes() error {
 	k8sAuth := c.config.KubernetesAuth
 
@@ -233,14 +204,14 @@ func (c *Client) authenticateKubernetes() error {
 		c.mu.Unlock()
 	}
 
-	c.logger.Info("successfully authenticated with Kubernetes auth",
+	c.logger.Info("Успешная аутентификация Kubernetes auth",
 		"role", k8sAuth.Role,
 		"lease_duration", secret.Auth.LeaseDuration)
 
 	return nil
 }
 
-// RefreshToken refreshes the authentication token if needed
+// RefreshToken — если токен истекает в течение 5 минут, продлевает или повторно аутентифицируется.
 func (c *Client) RefreshToken(ctx context.Context) error {
 	c.mu.RLock()
 	expiry := c.tokenExpiry
@@ -251,7 +222,7 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 		return nil
 	}
 
-	c.logger.Debug("refreshing authentication token")
+	c.logger.Debug("Обновление токена аутентификации")
 
 	// Try to renew the token first
 	secret, err := c.client.Auth().Token().RenewSelfWithContext(ctx, 0)
@@ -259,22 +230,23 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 		c.mu.Lock()
 		c.tokenExpiry = time.Now().Add(time.Duration(secret.Auth.LeaseDuration) * time.Second)
 		c.mu.Unlock()
-		c.logger.Debug("token renewed successfully")
+		c.logger.Debug("Токен успешно обновлён")
 		return nil
 	}
 
 	// If renewal fails, re-authenticate
-	c.logger.Debug("token renewal failed, re-authenticating")
+	c.logger.Debug("Обновление токена не удалось, повторная аутентификация")
 	return c.authenticate()
 }
 
-// TransitEncrypt encrypts data using the Transit secrets engine
+// TransitEncrypt — шифрует plaintext через transit/encrypt/{keyName}, возвращает ciphertext (база64).
 func (c *Client) TransitEncrypt(ctx context.Context, keyName string, plaintext []byte) (string, error) {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен перед шифрованием", "error", err)
 	}
 
 	path := fmt.Sprintf("%s/encrypt/%s", c.config.TransitMount, keyName)
+	c.logger.Debug("Transit encrypt", "path", path, "plaintextLen", len(plaintext))
 
 	data := map[string]interface{}{
 		"plaintext": base64.StdEncoding.EncodeToString(plaintext),
@@ -297,13 +269,14 @@ func (c *Client) TransitEncrypt(ctx context.Context, keyName string, plaintext [
 	return ciphertext, nil
 }
 
-// TransitDecrypt decrypts data using the Transit secrets engine
+// TransitDecrypt — дешифрует ciphertext через transit/decrypt/{keyName}.
 func (c *Client) TransitDecrypt(ctx context.Context, keyName string, ciphertext string) ([]byte, error) {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен перед дешифрованием", "error", err)
 	}
 
 	path := fmt.Sprintf("%s/decrypt/%s", c.config.TransitMount, keyName)
+	c.logger.Debug("Transit decrypt", "path", path)
 
 	data := map[string]interface{}{
 		"ciphertext": ciphertext,
@@ -331,13 +304,14 @@ func (c *Client) TransitDecrypt(ctx context.Context, keyName string, ciphertext 
 	return plaintext, nil
 }
 
-// TransitGetKeyInfo gets information about a transit key
+// TransitGetKeyInfo — читает transit/keys/{keyName}, возвращает latest_version, type.
 func (c *Client) TransitGetKeyInfo(ctx context.Context, keyName string) (*TransitKeyInfo, error) {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен при GetKeyInfo", "error", err)
 	}
 
 	path := fmt.Sprintf("%s/keys/%s", c.config.TransitMount, keyName)
+	c.logger.Debug("Transit GetKeyInfo", "path", path)
 
 	secret, err := c.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
@@ -378,11 +352,11 @@ type TransitKeyInfo struct {
 // TransitCreateKey creates a new transit encryption key
 func (c *Client) TransitCreateKey(ctx context.Context, keyName string, keyType string) error {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен при создании ключа", "error", err)
 	}
 
 	path := fmt.Sprintf("%s/keys/%s", c.config.TransitMount, keyName)
-
+	c.logger.Debug("Transit CreateKey", "path", path, "type", keyType)
 	data := map[string]interface{}{}
 	if keyType != "" {
 		data["type"] = keyType
@@ -393,18 +367,18 @@ func (c *Client) TransitCreateKey(ctx context.Context, keyName string, keyType s
 		return fmt.Errorf("failed to create transit key: %w", err)
 	}
 
-	c.logger.Info("created transit key", "name", keyName, "type", keyType)
+	c.logger.Info("Transit ключ создан", "name", keyName, "type", keyType)
 	return nil
 }
 
-// KVRead reads a secret from the KV secrets engine (v2)
+// KVRead — читает секрет из KV v2 по пути {kvMount}/data/{path}, возвращает data (без metadata).
 func (c *Client) KVRead(ctx context.Context, path string) (map[string]interface{}, error) {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен при KVRead", "error", err)
 	}
 
 	fullPath := fmt.Sprintf("%s/data/%s", c.config.KVMount, path)
-
+	c.logger.Debug("KVRead", "path", fullPath)
 	secret, err := c.client.Logical().ReadWithContext(ctx, fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read secret: %w", err)
@@ -448,14 +422,14 @@ func (c *Client) KVReadWithVersion(ctx context.Context, path string, version int
 	return data, nil
 }
 
-// KVWrite writes a secret to the KV secrets engine (v2)
+// KVWrite — записывает секрет в KV v2 по пути {kvMount}/data/{path}.
 func (c *Client) KVWrite(ctx context.Context, path string, data map[string]interface{}) error {
 	if err := c.RefreshToken(ctx); err != nil {
-		c.logger.Warn("failed to refresh token", "error", err)
+		c.logger.Warn("Не удалось обновить токен при KVWrite", "error", err)
 	}
 
 	fullPath := fmt.Sprintf("%s/data/%s", c.config.KVMount, path)
-
+	c.logger.Debug("KVWrite", "path", fullPath)
 	writeData := map[string]interface{}{
 		"data": data,
 	}

@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Kubebao KMS — gRPC-сервер шифрования секретов Kubernetes (Transit или Kuznyechik).
 package main
 
 import (
@@ -64,38 +49,41 @@ func main() {
 
 	logger := hclog.New(loggerOpts)
 
-	logger.Info("starting kubebao-kms", "version", Version)
+	logger.Info("Запуск kubebao-kms", "version", Version)
 
-	// Load configuration
+	// Загрузка конфигурации
 	var config *kms.Config
 	var err error
 
 	if configFile != "" {
-		logger.Info("loading configuration from file", "path", configFile)
+		logger.Info("Загрузка конфигурации из файла", "path", configFile)
 		config, err = kms.LoadConfig(configFile)
 		if err != nil {
-			logger.Error("failed to load configuration", "error", err)
+			logger.Error("Ошибка загрузки конфигурации", "error", err)
 			os.Exit(1)
 		}
+		logger.Info("Конфигурация успешно загружена из файла")
 	} else {
-		logger.Info("loading configuration from environment variables")
+		logger.Info("Загрузка конфигурации из переменных окружения")
 		config = kms.LoadConfigFromEnv()
 	}
 
-	// Validate configuration
+	// Проверка конфигурации
 	if err := config.Validate(); err != nil {
-		logger.Error("invalid configuration", "error", err)
+		logger.Error("Неверная конфигурация", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("Конфигурация проверена успешно", "provider", config.EncryptionProvider, "keyName", config.KeyName)
 
-	// Create KMS server
+	// Создание KMS сервера
 	server, err := kms.NewServer(config, logger)
 	if err != nil {
-		logger.Error("failed to create KMS server", "error", err)
+		logger.Error("Ошибка создания KMS сервера", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("KMS сервер создан успешно")
 
-	// Setup context with signal handling
+	// Обработка сигналов завершения
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -105,15 +93,15 @@ func main() {
 
 	go func() {
 		sig := <-sigChan
-		logger.Info("received signal, shutting down", "signal", sig)
+		logger.Info("Получен сигнал завершения, остановка сервера", "signal", sig)
 		cancel()
 	}()
 
-	// Run the server
+	// Запуск KMS сервера
 	if err := server.Run(ctx); err != nil {
-		logger.Error("KMS server error", "error", err)
+		logger.Error("Ошибка KMS сервера", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("kubebao-kms stopped")
+	logger.Info("kubebao-kms остановлен")
 }

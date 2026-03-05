@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Конфигурация OpenBao — адрес, токен, TLS, Kubernetes auth.
 package openbao
 
 import (
@@ -24,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadConfig loads the configuration from a YAML file
+// LoadConfig — загружает конфигурацию из YAML-файла (address обязателен).
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -44,7 +29,7 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// LoadConfigFromEnv loads configuration from environment variables
+// LoadConfigFromEnv — читает OPENBAO_*, VAULT_*, KUBEBAO_* переменные окружения.
 func LoadConfigFromEnv() *Config {
 	config := &Config{
 		Address:      getEnv("OPENBAO_ADDR", "VAULT_ADDR"),

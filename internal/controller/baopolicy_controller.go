@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Контроллер BaoPolicy — синхронизация политик OpenBao из BaoPolicy CRD.
 package controller
 
 import (
@@ -37,10 +22,11 @@ import (
 )
 
 const (
+	// Финализатор для BaoPolicy — вызов handleDeletion при удалении
 	baoPolicyFinalizer = "kubebao.io/policy-finalizer"
 )
 
-// BaoPolicyReconciler reconciles a BaoPolicy object
+// BaoPolicyReconciler — контроллер, синхронизирующий политики OpenBao (HCL) из BaoPolicy CRD.
 type BaoPolicyReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
@@ -52,21 +38,23 @@ type BaoPolicyReconciler struct {
 // +kubebuilder:rbac:groups=kubebao.io,resources=baopolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubebao.io,resources=baopolicies/finalizers,verbs=update
 
-// Reconcile handles the reconciliation loop for BaoPolicy
+// Reconcile — цикл согласования BaoPolicy. Записывает HCL-политику в OpenBao sys/policies/acl/.
 func (r *BaoPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("baopolicy", req.NamespacedName)
+	log.V(1).Info("Начало reconcile BaoPolicy", "namespace", req.Namespace, "name", req.Name)
 
-	// Fetch the BaoPolicy
+	// Загрузка BaoPolicy
 	baoPolicy := &kubebaoiov1alpha1.BaoPolicy{}
 	if err := r.Get(ctx, req.NamespacedName, baoPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
+			log.V(1).Info("BaoPolicy не найден — завершение")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "unable to fetch BaoPolicy")
+		log.Error(err, "Ошибка получения BaoPolicy")
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion
+	// Обработка удаления — снятие finalizer
 	if !baoPolicy.ObjectMeta.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, baoPolicy)
 	}
@@ -79,18 +67,20 @@ func (r *BaoPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Sync the policy
+	// Запись/обновление политики в OpenBao
+	log.V(1).Info("Синхронизация политики", "policyName", baoPolicy.GetPolicyName())
 	if err := r.syncPolicy(ctx, baoPolicy); err != nil {
-		log.Error(err, "failed to sync policy")
+		log.Error(err, "Ошибка синхронизации политики")
 		r.setCondition(baoPolicy, kubebaoiov1alpha1.ConditionTypeReady, metav1.ConditionFalse,
 			kubebaoiov1alpha1.ReasonFailed, err.Error())
 		if err := r.Status().Update(ctx, baoPolicy); err != nil {
 			return ctrl.Result{}, err
 		}
+		log.Info("Повтор через 30 секунд")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Update status
+	// Обновление статуса — Ready, LastSyncTime
 	baoPolicy.Status.ObservedGeneration = baoPolicy.Generation
 	now := metav1.Now()
 	baoPolicy.Status.LastSyncTime = &now
@@ -101,39 +91,41 @@ func (r *BaoPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	log.Info("policy synced successfully")
+	log.Info("Политика успешно синхронизирована", "policy", baoPolicy.Name)
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-// syncPolicy synchronizes the policy to OpenBao
+// syncPolicy — конвертирует BaoPolicy в HCL, сравнивает хэш с PolicyVersion, при изменении пишет в OpenBao.
 func (r *BaoPolicyReconciler) syncPolicy(ctx context.Context, baoPolicy *kubebaoiov1alpha1.BaoPolicy) error {
 	log := r.Log.WithValues("baopolicy", types.NamespacedName{
 		Name:      baoPolicy.Name,
 		Namespace: baoPolicy.Namespace,
 	})
 
-	// Get OpenBao client
+	// Клиент OpenBao
 	baoClient := r.OpenBaoClient
 	if baoClient == nil {
 		return fmt.Errorf("OpenBao client not configured")
 	}
 
-	// Generate policy HCL
+	// Генерация HCL из BaoPolicy.Spec.Rules (path "secret/*" { capabilities = [...] })
 	policyHCL := baoPolicy.ToHCL()
 	policyName := baoPolicy.GetPolicyName()
+	log.V(1).Info("HCL политики сгенерирован", "policyName", policyName)
 
-	// Calculate policy version (hash)
+	// Хэш HCL для проверки необходимости обновления
 	hash := sha256.Sum256([]byte(policyHCL))
 	version := hex.EncodeToString(hash[:8])
 
 	// Check if policy needs update
 	if baoPolicy.Status.PolicyVersion == version {
-		log.V(1).Info("policy unchanged, skipping update")
+		log.V(1).Info("Политика не изменилась, обновление пропущено")
 		return nil
 	}
 
-	// Write policy to OpenBao
+	// Запись в sys/policies/acl/{policyName}
 	path := fmt.Sprintf("sys/policies/acl/%s", policyName)
+	log.V(1).Info("Запись политики в OpenBao", "path", path)
 	data := map[string]interface{}{
 		"policy": policyHCL,
 	}
@@ -143,7 +135,7 @@ func (r *BaoPolicyReconciler) syncPolicy(ctx context.Context, baoPolicy *kubebao
 		return fmt.Errorf("failed to write policy to OpenBao: %w", err)
 	}
 
-	log.Info("policy written to OpenBao", "policyName", policyName)
+	log.Info("Политика записана в OpenBao", "policyName", policyName)
 
 	// Update status
 	baoPolicy.Status.PolicyVersion = version
@@ -167,7 +159,7 @@ func (r *BaoPolicyReconciler) handleDeletion(ctx context.Context, baoPolicy *kub
 
 			// Note: We use ReadSecret here to simulate DELETE - in production
 			// you'd want a proper delete method
-			log.Info("deleting policy from OpenBao", "policyName", policyName)
+			log.Info("Удаление политики из OpenBao", "policyName", policyName)
 
 			// For now, we'll just log the deletion intent
 			// The actual deletion would require the DELETE HTTP method

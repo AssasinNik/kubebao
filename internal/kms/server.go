@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// KMS сервер — gRPC API для шифрования/дешифрования секретов Kubernetes.
 package kms
 
 import (
@@ -31,14 +16,12 @@ import (
 )
 
 const (
-	// APIVersion is the KMS API version
-	APIVersion = "v2"
-
-	// HealthStatusOK indicates the KMS plugin is healthy
-	HealthStatusOK = "ok"
+	APIVersion    = "v2"   // Версия KMS API (совместима с Kubernetes 1.25+)
+	HealthStatusOK = "ok"  // Статус при успешной проверке здоровья
 )
 
-// Server implements the KMS v2 KeyManagementServiceServer interface
+// Server — реализация gRPC KeyManagementService v2. Kubernetes вызывает Encrypt/Decrypt
+// для секретов с encryptionConfiguration. Работает через Unix socket.
 type Server struct {
 	v2.UnimplementedKeyManagementServiceServer
 
@@ -50,7 +33,7 @@ type Server struct {
 	healthy  bool
 }
 
-// NewServer creates a new KMS server
+// NewServer — создаёт KMS сервер, инициализирует провайдер (Transit или Kuznyechik), проверяет/создаёт ключ.
 func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -69,7 +52,7 @@ func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kuznyechik provider: %w", err)
 		}
-		logger.Info("using Kuznyechik (GOST R 34.12-2015) encryption provider")
+		logger.Info("Использование провайдера Kuznyechik (GOST R 34.12-2015)")
 	case ProviderTransit:
 		fallthrough
 	default:
@@ -78,7 +61,7 @@ func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 			return nil, fmt.Errorf("failed to create transit client: %w", transitErr)
 		}
 		provider = transit
-		logger.Info("using OpenBao Transit encryption provider")
+		logger.Info("Использование провайдера OpenBao Transit")
 	}
 
 	server := &Server{
@@ -113,7 +96,7 @@ func newKuznyechikProviderFromConfig(config *Config, logger hclog.Logger) (*Kuzn
 
 // initialize initializes the KMS server
 func (s *Server) initialize(ctx context.Context) error {
-	s.logger.Info("initializing KMS server", "keyName", s.config.KeyName, "provider", s.config.EncryptionProvider)
+	s.logger.Info("Инициализация KMS сервера", "keyName", s.config.KeyName, "provider", s.config.EncryptionProvider)
 
 	keyInfo, err := s.provider.GetKeyInfo(ctx, s.config.KeyName)
 	if err != nil {
@@ -126,7 +109,7 @@ func (s *Server) initialize(ctx context.Context) error {
 				s.keyID = fmt.Sprintf("%s:v1", s.config.KeyName)
 				s.healthy = true
 				s.mu.Unlock()
-				s.logger.Info("KMS server initialized (kuznyechik, key will be created on first use)", "keyID", s.keyID)
+				s.logger.Info("KMS сервер инициализирован (Kuznyechik, ключ будет создан при первом использовании)", "keyID", s.keyID)
 				return nil
 			}
 		}
@@ -137,7 +120,7 @@ func (s *Server) initialize(ctx context.Context) error {
 
 		// For Transit: create the key
 		if transit, ok := s.provider.(*TransitClient); ok {
-			s.logger.Info("creating transit key", "keyName", s.config.KeyName, "keyType", s.config.KeyType)
+			s.logger.Info("Создание Transit ключа", "keyName", s.config.KeyName, "keyType", s.config.KeyType)
 			if err := transit.CreateKey(ctx, s.config.KeyName, s.config.KeyType); err != nil {
 				return fmt.Errorf("failed to create transit key: %w", err)
 			}
@@ -154,7 +137,7 @@ func (s *Server) initialize(ctx context.Context) error {
 		s.keyID = fmt.Sprintf("%s:v%d", s.config.KeyName, keyInfo.LatestVersion)
 		s.healthy = true
 		s.mu.Unlock()
-		s.logger.Info("KMS server initialized", "keyID", s.keyID)
+		s.logger.Info("KMS сервер инициализирован успешно", "keyID", s.keyID)
 	}
 
 	return nil
@@ -179,7 +162,7 @@ func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusR
 
 // Encrypt encrypts the given plaintext using the transit secrets engine
 func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.EncryptResponse, error) {
-	s.logger.Debug("encrypt request received", "uid", req.Uid, "plaintextSize", len(req.Plaintext))
+	s.logger.Debug("Запрос шифрования", "uid", req.Uid, "plaintextSize", len(req.Plaintext))
 
 	if len(req.Plaintext) == 0 {
 		return nil, fmt.Errorf("plaintext cannot be empty")
@@ -188,7 +171,7 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	// Encrypt using provider
 	ciphertext, err := s.provider.Encrypt(ctx, s.config.KeyName, req.Plaintext)
 	if err != nil {
-		s.logger.Error("encryption failed", "error", err, "uid", req.Uid)
+		s.logger.Error("Ошибка шифрования", "error", err, "uid", req.Uid)
 		return nil, fmt.Errorf("encryption failed: %w", err)
 	}
 
@@ -201,7 +184,7 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 		"kubebao.io/key-name": []byte(s.config.KeyName),
 	}
 
-	s.logger.Debug("encryption successful", "uid", req.Uid, "ciphertextSize", len(ciphertext))
+	s.logger.Debug("Шифрование выполнено успешно", "uid", req.Uid, "ciphertextSize", len(ciphertext))
 
 	return &v2.EncryptResponse{
 		Ciphertext:  []byte(ciphertext),
@@ -212,7 +195,7 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 
 // Decrypt decrypts the given ciphertext using the transit secrets engine
 func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.DecryptResponse, error) {
-	s.logger.Debug("decrypt request received", "uid", req.Uid, "keyId", req.KeyId, "ciphertextSize", len(req.Ciphertext))
+	s.logger.Debug("Запрос дешифрования", "uid", req.Uid, "keyId", req.KeyId, "ciphertextSize", len(req.Ciphertext))
 
 	if len(req.Ciphertext) == 0 {
 		return nil, fmt.Errorf("ciphertext cannot be empty")
@@ -221,11 +204,11 @@ func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.Decry
 	// Decrypt using provider
 	plaintext, err := s.provider.Decrypt(ctx, s.config.KeyName, string(req.Ciphertext))
 	if err != nil {
-		s.logger.Error("decryption failed", "error", err, "uid", req.Uid)
+		s.logger.Error("Ошибка дешифрования", "error", err, "uid", req.Uid)
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}
 
-	s.logger.Debug("decryption successful", "uid", req.Uid, "plaintextSize", len(plaintext))
+	s.logger.Debug("Дешифрование выполнено успешно", "uid", req.Uid, "plaintextSize", len(plaintext))
 
 	return &v2.DecryptResponse{
 		Plaintext: plaintext,
@@ -261,19 +244,19 @@ func (s *Server) Run(ctx context.Context) error {
 	grpcServer := grpc.NewServer()
 	v2.RegisterKeyManagementServiceServer(grpcServer, s)
 
-	s.logger.Info("KMS server starting", "socket", s.config.SocketPath)
+	s.logger.Info("Запуск KMS сервера", "socket", s.config.SocketPath, "provider", s.config.EncryptionProvider, "keyName", s.config.KeyName)
 
-	// Handle graceful shutdown
+	// Ожидание отмены контекста для graceful shutdown
 	go func() {
 		<-ctx.Done()
-		s.logger.Info("shutting down KMS server")
+		s.logger.Info("Остановка KMS сервера")
 		grpcServer.GracefulStop()
 	}()
 
-	// Start health check routine
+	// Периодическая проверка доступности ключа (HealthCheckInterval)
 	go s.healthCheckLoop(ctx)
 
-	// Start serving
+	// Блокирующий вызов до остановки
 	if err := grpcServer.Serve(listener); err != nil {
 		return fmt.Errorf("gRPC server failed: %w", err)
 	}
@@ -281,7 +264,7 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-// healthCheckLoop periodically checks the health of the OpenBao connection
+// healthCheckLoop — по тикеру вызывает performHealthCheck, при ошибке помечает unhealthy.
 func (s *Server) healthCheckLoop(ctx context.Context) {
 	ticker := NewTicker(s.config.HealthCheckInterval)
 	defer ticker.Stop()
@@ -309,7 +292,7 @@ func (s *Server) performHealthCheck(ctx context.Context) {
 			// Stay healthy if we were healthy - key might not exist yet
 			return
 		}
-		s.logger.Warn("health check failed", "error", err)
+		s.logger.Warn("Проверка здоровья не пройдена", "error", err)
 		s.healthy = false
 		return
 	}
@@ -317,7 +300,7 @@ func (s *Server) performHealthCheck(ctx context.Context) {
 	// Update key ID if version changed (key rotation)
 	newKeyID := fmt.Sprintf("%s:v%d", s.config.KeyName, keyInfo.LatestVersion)
 	if newKeyID != s.keyID {
-		s.logger.Info("key version changed", "oldKeyID", s.keyID, "newKeyID", newKeyID)
+		s.logger.Info("Версия ключа изменилась", "oldKeyID", s.keyID, "newKeyID", newKeyID)
 		s.keyID = newKeyID
 	}
 

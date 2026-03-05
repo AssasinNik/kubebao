@@ -1,19 +1,4 @@
-/*
-Copyright 2024 KubeBao Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
+// Контроллер BaoSecret — синхронизация секретов из OpenBao в Kubernetes Secrets.
 package controller
 
 import (
@@ -39,11 +24,15 @@ import (
 )
 
 const (
+	// Финализатор для корректного удаления: при удалении BaoSecret сначала вызывается handleDeletion
 	baoSecretFinalizer = "kubebao.io/finalizer"
+	// Интервал по умолчанию между проверками актуальности секрета (1 час)
 	defaultRefreshInterval = time.Hour
 )
 
-// BaoSecretReconciler reconciles a BaoSecret object
+// BaoSecretReconciler — контроллер, который отслеживает BaoSecret CRD и синхронизирует
+// данные из OpenBao KV в Kubernetes Secret. При изменении или удалении BaoSecret
+// автоматически обновляет или удаляет соответствующий Secret.
 type BaoSecretReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
@@ -58,28 +47,33 @@ type BaoSecretReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 
-// Reconcile handles the reconciliation loop for BaoSecret
+// Reconcile — основной цикл согласования. Вызывается при каждом изменении BaoSecret или
+// связанного Secret. Возвращает ctrl.Result с RequeueAfter для периодической пересинхронизации.
 func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("baosecret", req.NamespacedName)
+	log.V(1).Info("Начало reconcile", "namespace", req.Namespace, "name", req.Name)
 
-	// Fetch the BaoSecret
+	// Загрузка BaoSecret из API-сервера
 	baoSecret := &kubebaoiov1alpha1.BaoSecret{}
 	if err := r.Get(ctx, req.NamespacedName, baoSecret); err != nil {
 		if apierrors.IsNotFound(err) {
-			// Object not found, likely deleted
+			log.V(1).Info("BaoSecret не найден, возможно удалён — завершение reconcile")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "unable to fetch BaoSecret")
+		log.Error(err, "Ошибка получения BaoSecret")
 		return ctrl.Result{}, err
 	}
+	log.V(1).Info("BaoSecret загружен", "generation", baoSecret.Generation, "secretPath", baoSecret.Spec.SecretPath)
 
-	// Handle deletion
+	// Обработка удаления — удаление finalizer после очистки
 	if !baoSecret.ObjectMeta.DeletionTimestamp.IsZero() {
+		log.Info("Обработка удаления BaoSecret")
 		return r.handleDeletion(ctx, baoSecret)
 	}
 
-	// Add finalizer if not present
+	// Добавление finalizer при первом reconcile — гарантирует вызов handleDeletion перед удалением
 	if !controllerutil.ContainsFinalizer(baoSecret, baoSecretFinalizer) {
+		log.V(1).Info("Добавление finalizer")
 		controllerutil.AddFinalizer(baoSecret, baoSecretFinalizer)
 		if err := r.Update(ctx, baoSecret); err != nil {
 			return ctrl.Result{}, err
@@ -88,7 +82,7 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Check if sync is suspended
 	if baoSecret.Spec.SuspendSync {
-		log.Info("sync is suspended")
+		log.Info("Синхронизация приостановлена")
 		r.setCondition(baoSecret, kubebaoiov1alpha1.ConditionTypeReady, metav1.ConditionFalse, 
 			kubebaoiov1alpha1.ReasonSyncSuspended, "Sync is suspended")
 		if err := r.Status().Update(ctx, baoSecret); err != nil {
@@ -97,9 +91,10 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// Sync the secret
+	// Синхронизация секрета из OpenBao в Kubernetes Secret
+	log.V(1).Info("Синхронизация секрета", "path", baoSecret.Spec.SecretPath, "target", baoSecret.Spec.Target.Name)
 	if err := r.syncSecret(ctx, baoSecret); err != nil {
-		log.Error(err, "failed to sync secret")
+		log.Error(err, "Ошибка синхронизации секрета")
 		r.setCondition(baoSecret, kubebaoiov1alpha1.ConditionTypeSynced, metav1.ConditionFalse,
 			kubebaoiov1alpha1.ReasonFailed, err.Error())
 		r.setCondition(baoSecret, kubebaoiov1alpha1.ConditionTypeReady, metav1.ConditionFalse,
@@ -107,11 +102,11 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.Status().Update(ctx, baoSecret); err != nil {
 			return ctrl.Result{}, err
 		}
-		// Retry after some time
+		log.Info("Повторная попытка через 30 секунд")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Update status
+	// Обновление статуса BaoSecret — условия Ready/Synced, время последней синхронизации
 	baoSecret.Status.ObservedGeneration = baoSecret.Generation
 	now := metav1.Now()
 	baoSecret.Status.LastSyncTime = &now
@@ -121,36 +116,41 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		kubebaoiov1alpha1.ReasonSuccess, "Secret is ready")
 
 	if err := r.Status().Update(ctx, baoSecret); err != nil {
+		log.Error(err, "Ошибка обновления статуса BaoSecret")
 		return ctrl.Result{}, err
 	}
 
-	// Schedule next sync
+	// Планирование следующей синхронизации по refreshInterval (по умолчанию 1 час)
 	refreshInterval := r.parseRefreshInterval(baoSecret.Spec.RefreshInterval)
-	log.Info("secret synced successfully", "nextSync", refreshInterval)
+	log.Info("Секрет успешно синхронизирован", "secret", baoSecret.Spec.Target.Name, "nextSync", refreshInterval)
 	
 	return ctrl.Result{RequeueAfter: refreshInterval}, nil
 }
 
-// syncSecret synchronizes the secret from OpenBao to Kubernetes
+// syncSecret — читает секрет из OpenBao KV по указанному пути, применяет шаблон (если задан)
+// и создаёт/обновляет Kubernetes Secret в целевом namespace.
 func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebaoiov1alpha1.BaoSecret) error {
 	log := r.Log.WithValues("baosecret", types.NamespacedName{
 		Name:      baoSecret.Name,
 		Namespace: baoSecret.Namespace,
 	})
 
-	// Get OpenBao client (use default or create based on spec)
+	// Клиент OpenBao — общий для всех BaoSecret (настраивается в main через env/config)
 	baoClient := r.OpenBaoClient
 	if baoClient == nil {
 		return fmt.Errorf("OpenBao client not configured")
 	}
 
-	// Read secret from OpenBao
+	// Чтение секрета из OpenBao KV v2 (путь вида secret/data/myapp/database)
+	log.V(1).Info("Чтение секрета из OpenBao", "path", baoSecret.Spec.SecretPath)
 	secretData, err := baoClient.KVRead(ctx, baoSecret.Spec.SecretPath)
 	if err != nil {
+		log.Error(err, "Ошибка чтения секрета из OpenBao", "path", baoSecret.Spec.SecretPath)
 		return fmt.Errorf("failed to read secret from OpenBao: %w", err)
 	}
+	log.V(1).Info("Секрет прочитан", "keysCount", len(secretData))
 
-	// Extract specific key if specified
+	// Извлечение конкретного ключа (SecretKey) или всех ключей
 	var data map[string][]byte
 	if baoSecret.Spec.SecretKey != "" {
 		value, ok := secretData[baoSecret.Spec.SecretKey]
@@ -167,24 +167,26 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 		}
 	}
 
-	// Apply template if specified
+	// Применение шаблона StringData/Data — подстановка {{ .Data.key }} из sourceData
 	if baoSecret.Spec.Template != nil {
 		data, err = r.applyTemplate(data, baoSecret.Spec.Template, secretData)
 		if err != nil {
+			log.Error(err, "Ошибка применения шаблона")
 			return fmt.Errorf("failed to apply template: %w", err)
 		}
+		log.V(1).Info("Шаблон применён")
 	}
 
-	// Determine target namespace
+	// Целевой namespace — из spec или совпадает с namespace BaoSecret
 	targetNamespace := baoSecret.Spec.Target.Namespace
 	if targetNamespace == "" {
 		targetNamespace = baoSecret.Namespace
 	}
 
-	// Calculate secret version (hash of data)
+	// Хэш данных для отслеживания изменений (версионирование)
 	version := r.calculateVersion(data)
 
-	// Create or update the Kubernetes secret
+	// CreateOrUpdate — идемпотентное создание/обновление Secret (операция: "created" или "updated")
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      baoSecret.Spec.Target.Name,
@@ -193,7 +195,7 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 	}
 
 	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
-		// Set labels
+		// Метки для идентификации управляемого секрета
 		if secret.Labels == nil {
 			secret.Labels = make(map[string]string)
 		}
@@ -203,7 +205,7 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 			secret.Labels[k] = v
 		}
 
-		// Set annotations
+		// Аннотации: путь в OpenBao, версия (хэш данных)
 		if secret.Annotations == nil {
 			secret.Annotations = make(map[string]string)
 		}
@@ -213,17 +215,17 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 			secret.Annotations[k] = v
 		}
 
-		// Set secret type
+		// Тип Secret (Opaque, kubernetes.io/tls, kubernetes.io/dockerconfigjson и т.д.)
 		if baoSecret.Spec.Target.Type != "" {
 			secret.Type = corev1.SecretType(baoSecret.Spec.Target.Type)
 		} else {
 			secret.Type = corev1.SecretTypeOpaque
 		}
 
-		// Set data
+		// Данные секрета (все ключи → []byte)
 		secret.Data = data
 
-		// Set owner reference based on creation policy
+		// Owner reference: при "Owner" Secret удаляется вместе с BaoSecret; при "Orphan" — остаётся
 		if baoSecret.Spec.Target.CreationPolicy == "Owner" || baoSecret.Spec.Target.CreationPolicy == "" {
 			if targetNamespace == baoSecret.Namespace {
 				return controllerutil.SetControllerReference(baoSecret, secret, r.Scheme)
@@ -237,7 +239,7 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 		return fmt.Errorf("failed to create/update secret: %w", err)
 	}
 
-	log.Info("secret operation completed", "operation", op, "secret", secret.Name)
+	log.Info("Операция с секретом выполнена", "operation", op, "secret", secret.Name, "namespace", secret.Namespace)
 
 	// Update status
 	baoSecret.Status.SecretVersion = version
@@ -247,7 +249,7 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 	return nil
 }
 
-// handleDeletion handles the deletion of a BaoSecret
+// handleDeletion — вызывается при удалении BaoSecret. При Orphan policy Secret не удаляется.
 func (r *BaoSecretReconciler) handleDeletion(ctx context.Context, baoSecret *kubebaoiov1alpha1.BaoSecret) (ctrl.Result, error) {
 	log := r.Log.WithValues("baosecret", types.NamespacedName{
 		Name:      baoSecret.Name,
@@ -255,12 +257,10 @@ func (r *BaoSecretReconciler) handleDeletion(ctx context.Context, baoSecret *kub
 	})
 
 	if controllerutil.ContainsFinalizer(baoSecret, baoSecretFinalizer) {
-		// Clean up owned resources if needed
-		// The secret will be garbage collected if owner reference is set
-
-		// If creation policy is Orphan, don't delete the secret
+		// Secret с owner reference удалится сборщиком мусора автоматически.
+		// При Orphan policy — намеренно оставляем Secret (пользователь удалит вручную при необходимости)
 		if baoSecret.Spec.Target.CreationPolicy == "Orphan" {
-			log.Info("orphaning managed secret")
+			log.Info("Секрет оставляется при удалении (Orphan policy)")
 		}
 
 		// Remove finalizer
@@ -273,7 +273,7 @@ func (r *BaoSecretReconciler) handleDeletion(ctx context.Context, baoSecret *kub
 	return ctrl.Result{}, nil
 }
 
-// applyTemplate applies the template to the secret data
+// applyTemplate — подстановка шаблонов {{ .Data.key }} в StringData и Data из sourceData
 func (r *BaoSecretReconciler) applyTemplate(data map[string][]byte, template *kubebaoiov1alpha1.SecretTemplate, sourceData map[string]interface{}) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 
@@ -310,7 +310,7 @@ func (r *BaoSecretReconciler) applyTemplate(data map[string][]byte, template *ku
 	return result, nil
 }
 
-// replaceAll replaces all occurrences of old with new in s
+// replaceAll — замена всех вхождений old на new в строке s (без regex)
 func replaceAll(s, old, new string) string {
 	for {
 		newS := s
@@ -325,7 +325,7 @@ func replaceAll(s, old, new string) string {
 	return s
 }
 
-// indexOf returns the index of substr in s, or -1 if not found
+// indexOf — возвращает индекс первого вхождения substr в s или -1
 func indexOf(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -335,14 +335,14 @@ func indexOf(s, substr string) int {
 	return -1
 }
 
-// calculateVersion calculates a version hash for the secret data
+// calculateVersion — SHA256-хэш данных (первые 8 байт в hex) для версионирования
 func (r *BaoSecretReconciler) calculateVersion(data map[string][]byte) string {
 	jsonData, _ := json.Marshal(data)
 	hash := sha256.Sum256(jsonData)
 	return hex.EncodeToString(hash[:8])
 }
 
-// parseRefreshInterval parses the refresh interval string
+// parseRefreshInterval — разбор интервала ("1h", "30m"). Минимум 1 минута.
 func (r *BaoSecretReconciler) parseRefreshInterval(interval string) time.Duration {
 	if interval == "" {
 		return defaultRefreshInterval
@@ -361,7 +361,7 @@ func (r *BaoSecretReconciler) parseRefreshInterval(interval string) time.Duratio
 	return d
 }
 
-// setCondition sets a condition on the BaoSecret status
+// setCondition — обновление условия в status.conditions (Ready, Synced)
 func (r *BaoSecretReconciler) setCondition(baoSecret *kubebaoiov1alpha1.BaoSecret, condType string, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 
