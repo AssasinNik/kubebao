@@ -1,0 +1,216 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: baopolicies.kubebao.io
+spec:
+  group: kubebao.io
+  names:
+    kind: BaoPolicy
+    listKind: BaoPolicyList
+    plural: baopolicies
+    singular: baopolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.appliedPolicyName
+      name: Policy Name
+      type: string
+    - jsonPath: .status.lastSyncTime
+      name: Last Sync
+      type: date
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BaoPolicy is the Schema for the baopolicies API
+        properties:
+          apiVersion:
+            description: APIVersion defines the versioned schema of this representation
+              of an object.
+            type: string
+          kind:
+            description: Kind is a string value representing the REST resource this
+              object represents.
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BaoPolicySpec defines the desired state of BaoPolicy
+            properties:
+              openbaoRef:
+                description: OpenBaoRef references the OpenBao connection to use
+                properties:
+                  address:
+                    description: Address is the address of the OpenBao server
+                    type: string
+                  authMethod:
+                    default: kubernetes
+                    description: AuthMethod is the authentication method to use
+                    type: string
+                  authMountPath:
+                    description: AuthMountPath is the mount path for the auth method
+                    type: string
+                  namespace:
+                    description: Namespace is the OpenBao namespace
+                    type: string
+                  serviceAccountRef:
+                    description: ServiceAccountRef references a ServiceAccount to
+                      use for authentication
+                    properties:
+                      name:
+                        description: Name is the name of the ServiceAccount
+                        type: string
+                      namespace:
+                        description: Namespace is the namespace of the ServiceAccount
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
+              policyName:
+                description: PolicyName is the name of the policy in OpenBao
+                type: string
+              rules:
+                description: Rules defines the policy rules
+                items:
+                  description: PolicyRule defines a single policy rule
+                  properties:
+                    allowedParameters:
+                      additionalProperties:
+                        items:
+                          type: string
+                        type: array
+                      description: AllowedParameters restricts which keys and values
+                        can be set
+                      type: object
+                    capabilities:
+                      description: Capabilities are the operations allowed on the
+                        path
+                      items:
+                        description: Capability represents an operation capability
+                        enum:
+                        - create
+                        - read
+                        - update
+                        - delete
+                        - list
+                        - sudo
+                        - deny
+                        - patch
+                        type: string
+                      minItems: 1
+                      type: array
+                    deniedParameters:
+                      description: DeniedParameters specifies keys that cannot be
+                        set
+                      items:
+                        type: string
+                      type: array
+                    maxWrappingTTL:
+                      description: MaxWrappingTTL specifies maximum wrapping TTL
+                      type: string
+                    minWrappingTTL:
+                      description: MinWrappingTTL specifies minimum wrapping TTL
+                      type: string
+                    path:
+                      description: Path is the path pattern for this rule (supports
+                        wildcards)
+                      type: string
+                    requiredParameters:
+                      description: RequiredParameters specifies keys that must be
+                        set
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - capabilities
+                  - path
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - rules
+            type: object
+          status:
+            description: BaoPolicyStatus defines the observed state of BaoPolicy
+            properties:
+              appliedPolicyName:
+                description: AppliedPolicyName is the name of the policy as it appears
+                  in OpenBao
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the BaoPolicy's state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: lastTransitionTime is the last time the condition
+                        transitioned from one status to another.
+                      format: date-time
+                      type: string
+                    message:
+                      description: message is a human readable message indicating
+                        details about the transition.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: observedGeneration represents the .metadata.generation
+                        that the condition was set based upon.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: reason contains a programmatic identifier indicating
+                        the reason for the condition's last transition.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastSyncTime:
+                description: LastSyncTime is the last time the policy was synced to
+                  OpenBao
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the last observed generation
+                format: int64
+                type: integer
+              policyVersion:
+                description: PolicyVersion is a hash of the policy content
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

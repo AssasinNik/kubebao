@@ -1,0 +1,69 @@
+// Secrets Store CSI Driver Provider Protocol
+// Based on: https://github.com/kubernetes-sigs/secrets-store-csi-driver
+
+syntax = "proto3";
+
+package v1alpha1;
+
+option go_package = "github.com/kubebao/kubebao/internal/csi/proto";
+
+service CSIDriverProvider {
+    // Mount is called by the secrets-store-csi-driver to mount secrets
+    rpc Mount(MountRequest) returns (MountResponse) {}
+    // Version returns the provider version
+    rpc Version(VersionRequest) returns (VersionResponse) {}
+}
+
+message MountRequest {
+    // Attributes are the SecretProviderClass parameters
+    string attributes = 1;
+    // Secrets are the secrets from the pod spec
+    string secrets = 2;
+    // TargetPath is the path where secrets should be written
+    string target_path = 3;
+    // Permission is the file permission
+    string permission = 4;
+    // CurrentObjectVersion contains the current versions of objects
+    repeated ObjectVersion current_object_version = 5;
+}
+
+message MountResponse {
+    // ObjectVersion contains the versions of mounted objects
+    repeated ObjectVersion object_version = 1;
+    // Error contains error information if any
+    Error error = 2;
+    // Files contains the files to be written
+    repeated File files = 3;
+}
+
+message VersionRequest {}
+
+message VersionResponse {
+    // Version is the provider version
+    string version = 1;
+    // RuntimeName is the name of the runtime
+    string runtime_name = 2;
+    // RuntimeVersion is the version of the runtime
+    string runtime_version = 3;
+}
+
+message ObjectVersion {
+    // Id is the object identifier
+    string id = 1;
+    // Version is the object version
+    string version = 2;
+}
+
+message File {
+    // Path is the file path relative to mount point
+    string path = 1;
+    // Mode is the file permission mode
+    int32 mode = 2;
+    // Contents is the file contents
+    bytes contents = 3;
+}
+
+message Error {
+    // Code is the error code
+    string code = 1;
+}

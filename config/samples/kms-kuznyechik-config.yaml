@@ -1,0 +1,20 @@
+# KMS configuration for Kuznyechik (GOST R 34.12-2015) provider
+# Keys are stored in OpenBao KV, encryption is performed locally
+#
+# Usage:
+#   kubebao-kms --config kms-kuznyechik-config.yaml
+
+socketPath: /var/run/kubebao/kms.sock
+keyName: kubebao-kms
+keyType: kuznyechik
+encryptionProvider: kuznyechik
+kvPathPrefix: kubebao/kms-keys
+createKeyIfNotExists: true
+
+openbao:
+  address: ${OPENBAO_ADDR}
+  # Kubernetes auth
+  kubernetesAuth:
+    role: kubebao
+    mountPath: kubernetes
+    tokenPath: /var/run/secrets/kubernetes.io/serviceaccount/token

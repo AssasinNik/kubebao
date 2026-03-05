@@ -1,0 +1,103 @@
+---
+# Simple policy - read access to secrets
+apiVersion: kubebao.io/v1alpha1
+kind: BaoPolicy
+metadata:
+  name: my-app-policy
+  namespace: default
+spec:
+  # Optional: custom policy name in OpenBao
+  # If not set, uses the BaoPolicy name
+  policyName: "k8s-my-app"
+  
+  rules:
+    # Read access to app secrets
+    - path: "secret/data/myapp/*"
+      capabilities:
+        - read
+        - list
+    
+    # Read metadata
+    - path: "secret/metadata/myapp/*"
+      capabilities:
+        - read
+        - list
+---
+# Advanced policy with multiple rules
+apiVersion: kubebao.io/v1alpha1
+kind: BaoPolicy
+metadata:
+  name: database-app-policy
+  namespace: production
+spec:
+  policyName: "k8s-production-database"
+  
+  rules:
+    # Generate database credentials
+    - path: "database/creds/my-role"
+      capabilities:
+        - read
+    
+    # Access to KV secrets
+    - path: "secret/data/production/*"
+      capabilities:
+        - read
+        - list
+    
+    # PKI certificate issuance
+    - path: "pki/issue/production-role"
+      capabilities:
+        - create
+        - update
+      # Restrict parameters
+      allowedParameters:
+        common_name:
+          - "*.example.com"
+        ttl:
+          - "720h"
+          - "168h"
+          - "24h"
+      requiredParameters:
+        - common_name
+    
+    # Transit encryption
+    - path: "transit/encrypt/my-key"
+      capabilities:
+        - update
+    - path: "transit/decrypt/my-key"
+      capabilities:
+        - update
+---
+# Admin policy
+apiVersion: kubebao.io/v1alpha1
+kind: BaoPolicy
+metadata:
+  name: admin-policy
+  namespace: kube-system
+spec:
+  policyName: "k8s-admin"
+  
+  rules:
+    # Full access to secrets
+    - path: "secret/*"
+      capabilities:
+        - create
+        - read
+        - update
+        - delete
+        - list
+    
+    # Manage transit keys
+    - path: "transit/*"
+      capabilities:
+        - create
+        - read
+        - update
+        - delete
+        - list
+    
+    # Read system health
+    - path: "sys/health"
+      capabilities:
+        - read
+        - sudo
