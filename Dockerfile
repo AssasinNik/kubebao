@@ -3,6 +3,8 @@ FROM golang:1.23-alpine AS builder
 
 ARG COMPONENT=kubebao-kms
 ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 
@@ -19,7 +21,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-s -w -X main.Version=${VERSION}" \
     -o /workspace/bin/${COMPONENT} \
     ./cmd/${COMPONENT}
