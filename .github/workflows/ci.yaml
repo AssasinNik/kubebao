@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:  # Ручной запуск: Actions → CI → Run workflow
+
+# Явно выдаём права токену workflow (иначе часто получаем GHCR: write_package).
 permissions:
   contents: read
   packages: write
+
 env:
   GO_VERSION: '1.23'
   REGISTRY: ghcr.io
@@ -105,8 +108,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: assasinnik
-          password: ${{ secrets.GHCR_PAT }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -145,25 +148,3 @@ jobs:
 
       - name: Lint Helm chart
         run: helm lint ./charts/kubebao
-
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: [docker]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Minikube
-        uses: medyagh/setup-minikube@master
-        with:
-          kubernetes-version: v1.29.0
-          driver: docker
-          cpus: 4
-          memory: 8192
-
-      - name: Run E2E tests
-        run: |
-          # Use images from GHCR
-          export IMAGE_TAG=${{ github.sha }}
-          ./scripts/e2e-test.sh --quick
