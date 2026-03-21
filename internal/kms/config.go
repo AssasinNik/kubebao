@@ -61,8 +61,8 @@ func LoadConfigFromEnv() *Config {
 	config := &Config{
 		SocketPath:           getEnvDefault("KUBEBAO_KMS_SOCKET", "/var/run/kubebao/kms.sock"),
 		KeyName:              getEnvDefault("KUBEBAO_KMS_KEY_NAME", "kubebao-kms"),
-		KeyType:              getEnvDefault("KUBEBAO_KMS_KEY_TYPE", "aes256-gcm96"),
-		EncryptionProvider:   getEnvDefault("KUBEBAO_KMS_PROVIDER", ProviderTransit),
+		KeyType:              getEnvDefault("KUBEBAO_KMS_KEY_TYPE", "kuznyechik"),
+		EncryptionProvider:   getEnvDefault("KUBEBAO_KMS_PROVIDER", ProviderKuznyechik),
 		KVPathPrefix:         getEnvDefault("KUBEBAO_KMS_KV_PREFIX", "kubebao/kms-keys"),
 		CreateKeyIfNotExists: getEnvBool("KUBEBAO_KMS_CREATE_KEY", true),
 		HealthCheckInterval:  getDurationEnv("KUBEBAO_KMS_HEALTH_INTERVAL", 30*time.Second),
@@ -83,15 +83,11 @@ func (c *Config) setDefaults() {
 	}
 
 	if c.EncryptionProvider == "" {
-		c.EncryptionProvider = ProviderTransit
-	}
-
-	if c.EncryptionProvider == ProviderKuznyechik && c.KeyType == "" {
-		c.KeyType = "kuznyechik"
+		c.EncryptionProvider = ProviderKuznyechik
 	}
 
 	if c.KeyType == "" {
-		c.KeyType = "aes256-gcm96"
+		c.KeyType = "kuznyechik"
 	}
 
 	if c.KVPathPrefix == "" {
@@ -187,8 +183,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		SocketPath:           "/var/run/kubebao/kms.sock",
 		KeyName:              "kubebao-kms",
-		KeyType:              "aes256-gcm96",
-		EncryptionProvider:   ProviderTransit,
+		KeyType:              "kuznyechik",
+		EncryptionProvider:   ProviderKuznyechik,
 		KVPathPrefix:         "kubebao/kms-keys",
 		CreateKeyIfNotExists: true,
 		HealthCheckInterval:  30 * time.Second,

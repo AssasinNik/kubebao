@@ -27,7 +27,7 @@ spec:
       initContainers:
         - name: init-provider-dir
           image: busybox:1.36
-          command: ['sh', '-c', 'mkdir -p /provider && chown 10123:10123 /provider && chmod 755 /provider']
+          command: ['sh', '-c', 'mkdir -p /provider && chown 10123:10123 /provider && chmod 700 /provider']
           securityContext:
             runAsUser: 0
           volumeMounts:

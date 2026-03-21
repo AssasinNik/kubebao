@@ -154,12 +154,16 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Verify modules
+        run: go mod verify
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
           CGO_ENABLED=0 go build \
+            -trimpath \
             -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" \
             -o ${{ matrix.component }}-${{ matrix.goos }}-${{ matrix.goarch }} \
             ./cmd/${{ matrix.component }}

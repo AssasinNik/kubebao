@@ -7,7 +7,6 @@ require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/openbao/openbao/api/v2 v2.1.0
-	github.com/starius/kuznyechik v0.0.0-20170219141716-b5b5e952fe24
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.65.0

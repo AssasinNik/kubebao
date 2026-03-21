@@ -1,5 +1,8 @@
-# KMS configuration for Kuznyechik (GOST R 34.12-2015) provider
-# Keys are stored in OpenBao KV, encryption is performed locally
+# KMS configuration — Кузнечик (ГОСТ Р 34.12-2015 + ГОСТ Р 34.13-2015)
+#
+# Шифрование: Кузнечик-CTR (ГОСТ Р 34.13-2015)
+# Аутентификация: CMAC на базе Кузнечика (ГОСТ Р 34.13-2015)
+# Ключи хранятся в OpenBao KV, шифрование выполняется локально.
 #
 # Usage:
 #   kubebao-kms --config kms-kuznyechik-config.yaml
@@ -10,11 +13,18 @@ keyType: kuznyechik
 encryptionProvider: kuznyechik
 kvPathPrefix: kubebao/kms-keys
 createKeyIfNotExists: true
+healthCheckInterval: 30s
 
 openbao:
-  address: ${OPENBAO_ADDR}
-  # Kubernetes auth
+  address: "http://openbao.openbao.svc.cluster.local:8200"
+  # Kubernetes auth (recommended for production)
   kubernetesAuth:
     role: kubebao
     mountPath: kubernetes
     tokenPath: /var/run/secrets/kubernetes.io/serviceaccount/token
+  # TLS (обязательно для production)
+  # tls:
+  #   caCert: /etc/kubebao/ca.crt
+  #   insecure: false
+  maxRetries: 3
+  timeout: 30s

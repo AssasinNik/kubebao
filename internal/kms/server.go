@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/kubebao/kubebao/internal/openbao"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"k8s.io/kms/apis/v2"
 )
 
@@ -33,7 +35,8 @@ type Server struct {
 	healthy  bool
 }
 
-// NewServer — создаёт KMS сервер, инициализирует провайдер (Transit или Kuznyechik), проверяет/создаёт ключ.
+// NewServer — создаёт KMS сервер с провайдером Кузнечик (ГОСТ Р 34.12-2015).
+// Transit-провайдер оставлен для обратной совместимости, но по умолчанию используется Кузнечик.
 func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -47,21 +50,21 @@ func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 	var err error
 
 	switch config.EncryptionProvider {
-	case ProviderKuznyechik:
-		provider, err = newKuznyechikProviderFromConfig(config, logger)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create kuznyechik provider: %w", err)
-		}
-		logger.Info("Использование провайдера Kuznyechik (GOST R 34.12-2015)")
 	case ProviderTransit:
-		fallthrough
-	default:
+		logger.Warn("Transit-провайдер — не рекомендуется для production. Используйте Kuznyechik (ГОСТ Р 34.12-2015).")
 		transit, transitErr := NewTransitClient(config, logger)
 		if transitErr != nil {
 			return nil, fmt.Errorf("failed to create transit client: %w", transitErr)
 		}
 		provider = transit
-		logger.Info("Использование провайдера OpenBao Transit")
+	case ProviderKuznyechik:
+		fallthrough
+	default:
+		provider, err = newKuznyechikProviderFromConfig(config, logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create kuznyechik provider: %w", err)
+		}
+		logger.Info("Использование провайдера Kuznyechik (ГОСТ Р 34.12-2015 + ГОСТ Р 34.13-2015)")
 	}
 
 	server := &Server{
@@ -217,31 +220,38 @@ func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.Decry
 
 // Run starts the KMS gRPC server
 func (s *Server) Run(ctx context.Context) error {
-	// Ensure socket directory exists
 	socketDir := filepath.Dir(s.config.SocketPath)
-	if err := os.MkdirAll(socketDir, 0755); err != nil {
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		return fmt.Errorf("failed to create socket directory: %w", err)
 	}
 
-	// Remove existing socket file
 	if err := os.Remove(s.config.SocketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove existing socket: %w", err)
 	}
 
-	// Create Unix socket listener
 	listener, err := net.Listen("unix", s.config.SocketPath)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 	defer listener.Close()
 
-	// Set socket permissions
-	if err := os.Chmod(s.config.SocketPath, 0660); err != nil {
+	if err := os.Chmod(s.config.SocketPath, 0600); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(16*1024*1024),
+		grpc.MaxSendMsgSize(16*1024*1024),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle: 5 * time.Minute,
+			Time:              30 * time.Second,
+			Timeout:           10 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	v2.RegisterKeyManagementServiceServer(grpcServer, s)
 
 	s.logger.Info("Запуск KMS сервера", "socket", s.config.SocketPath, "provider", s.config.EncryptionProvider, "keyName", s.config.KeyName)

@@ -2,6 +2,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -121,68 +123,95 @@ func init() {
 	SchemeBuilder.Register(&BaoPolicy{}, &BaoPolicyList{})
 }
 
-// ToHCL converts the policy rules to HCL format for OpenBao
+// ToHCL converts the policy rules to HCL format for OpenBao.
+// All string values are escaped to prevent HCL injection.
 func (p *BaoPolicy) ToHCL() string {
-	var hcl string
+	var b strings.Builder
 
 	for _, rule := range p.Spec.Rules {
-		hcl += "path \"" + rule.Path + "\" {\n"
-		hcl += "  capabilities = ["
+		b.WriteString("path \"")
+		b.WriteString(escapeHCLString(rule.Path))
+		b.WriteString("\" {\n")
+		b.WriteString("  capabilities = [")
 
 		for i, cap := range rule.Capabilities {
 			if i > 0 {
-				hcl += ", "
+				b.WriteString(", ")
 			}
-			hcl += "\"" + string(cap) + "\""
+			b.WriteString("\"")
+			b.WriteString(escapeHCLString(string(cap)))
+			b.WriteString("\"")
 		}
-		hcl += "]\n"
+		b.WriteString("]\n")
 
 		if len(rule.AllowedParameters) > 0 {
-			hcl += "  allowed_parameters = {\n"
+			b.WriteString("  allowed_parameters = {\n")
 			for key, values := range rule.AllowedParameters {
-				hcl += "    \"" + key + "\" = ["
+				b.WriteString("    \"")
+				b.WriteString(escapeHCLString(key))
+				b.WriteString("\" = [")
 				for i, v := range values {
 					if i > 0 {
-						hcl += ", "
+						b.WriteString(", ")
 					}
-					hcl += "\"" + v + "\""
+					b.WriteString("\"")
+					b.WriteString(escapeHCLString(v))
+					b.WriteString("\"")
 				}
-				hcl += "]\n"
+				b.WriteString("]\n")
 			}
-			hcl += "  }\n"
+			b.WriteString("  }\n")
 		}
 
 		if len(rule.DeniedParameters) > 0 {
-			hcl += "  denied_parameters = {\n"
+			b.WriteString("  denied_parameters = {\n")
 			for _, key := range rule.DeniedParameters {
-				hcl += "    \"" + key + "\" = []\n"
+				b.WriteString("    \"")
+				b.WriteString(escapeHCLString(key))
+				b.WriteString("\" = []\n")
 			}
-			hcl += "  }\n"
+			b.WriteString("  }\n")
 		}
 
 		if len(rule.RequiredParameters) > 0 {
-			hcl += "  required_parameters = ["
+			b.WriteString("  required_parameters = [")
 			for i, key := range rule.RequiredParameters {
 				if i > 0 {
-					hcl += ", "
+					b.WriteString(", ")
 				}
-				hcl += "\"" + key + "\""
+				b.WriteString("\"")
+				b.WriteString(escapeHCLString(key))
+				b.WriteString("\"")
 			}
-			hcl += "]\n"
+			b.WriteString("]\n")
 		}
 
 		if rule.MinWrappingTTL != "" {
-			hcl += "  min_wrapping_ttl = \"" + rule.MinWrappingTTL + "\"\n"
+			b.WriteString("  min_wrapping_ttl = \"")
+			b.WriteString(escapeHCLString(rule.MinWrappingTTL))
+			b.WriteString("\"\n")
 		}
 
 		if rule.MaxWrappingTTL != "" {
-			hcl += "  max_wrapping_ttl = \"" + rule.MaxWrappingTTL + "\"\n"
+			b.WriteString("  max_wrapping_ttl = \"")
+			b.WriteString(escapeHCLString(rule.MaxWrappingTTL))
+			b.WriteString("\"\n")
 		}
 
-		hcl += "}\n\n"
+		b.WriteString("}\n\n")
 	}
 
-	return hcl
+	return b.String()
+}
+
+// escapeHCLString экранирует спецсимволы для безопасной вставки в HCL-строку.
+func escapeHCLString(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
 }
 
 // GetPolicyName returns the policy name to use in OpenBao

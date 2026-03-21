@@ -50,36 +50,36 @@ kms:
   # Socket path for KMS plugin
   socketPath: /var/run/kubebao/kms.sock
   
-  # Encryption provider: "transit" (OpenBao Transit) or "kuznyechik" (GOST R 34.12-2015)
-  encryptionProvider: transit
+  # Encryption provider: "kuznyechik" (ГОСТ Р 34.12-2015, recommended) or "transit" (OpenBao Transit)
+  encryptionProvider: kuznyechik
   
   # Key configuration
   keyName: kubebao-kms
   
-  # Transit key configuration (used when encryptionProvider: transit)
-  transit:
-    # Key name in OpenBao Transit
-    keyName: kubebao-kms
-    # Key type for Transit
-    keyType: aes256-gcm96
-    # Mount path for Transit secrets engine
-    mountPath: transit
-    createKeyIfNotExists: true
-  
-  # Kuznyechik configuration (used when encryptionProvider: kuznyechik)
+  # Kuznyechik configuration (ГОСТ Р 34.12-2015 + ГОСТ Р 34.13-2015 CTR/CMAC)
   kuznyechik:
     # Path prefix for keys in OpenBao KV (secret/data/{kvPathPrefix}/{keyName})
     kvPathPrefix: kubebao/kms-keys
     createKeyIfNotExists: true
   
-  # Resources
+  # Transit key configuration (legacy, not recommended for production)
+  transit:
+    keyName: kubebao-kms
+    keyType: aes256-gcm96
+    mountPath: transit
+    createKeyIfNotExists: true
+  
+  # Health check interval for key availability verification
+  healthCheckInterval: 30s
+
+  # Resources (production-grade)
   resources:
     limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
       cpu: 100m
       memory: 128Mi
-    requests:
-      cpu: 50m
-      memory: 64Mi
   
   # Node selector
   nodeSelector: {}
@@ -93,11 +93,13 @@ kms:
       operator: Exists
       effect: NoSchedule
   
-  # Pod security context (allow root for initContainer)
+  # Pod security context
   securityContext:
     fsGroup: 10123
+    seccompProfile:
+      type: RuntimeDefault
   
-  # Container security context
+  # Container security context (hardened)
   containerSecurityContext:
     runAsNonRoot: true
     runAsUser: 10123
@@ -148,11 +150,13 @@ csi:
   # Tolerations
   tolerations: []
   
-  # Pod security context (allow root for initContainer)
+  # Pod security context
   securityContext:
     fsGroup: 10123
+    seccompProfile:
+      type: RuntimeDefault
   
-  # Container security context
+  # Container security context (hardened)
   containerSecurityContext:
     runAsNonRoot: true
     runAsUser: 10123
@@ -217,8 +221,10 @@ operator:
     runAsUser: 10123
     runAsGroup: 10123
     fsGroup: 10123
+    seccompProfile:
+      type: RuntimeDefault
   
-  # Container security context
+  # Container security context (hardened)
   containerSecurityContext:
     allowPrivilegeEscalation: false
     capabilities:

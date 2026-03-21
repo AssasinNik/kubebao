@@ -1,9 +1,11 @@
-// Kuznyechik провайдер — шифрование GOST R 34.12-2015, ключи в OpenBao KV.
+// Kuznyechik-провайдер — AEAD-шифрование по ГОСТ Р 34.12-2015 + ГОСТ Р 34.13-2015.
+// Ключи хранятся в OpenBao KV.
 package kms
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/kubebao/kubebao/internal/crypto"
@@ -24,8 +26,13 @@ func NewKuznyechikProvider(keyManager *KeyManager, logger hclog.Logger) *Kuznyec
 	}
 }
 
-// Encrypt encrypts plaintext using Kuznyechik-AEAD
+// Encrypt шифрует plaintext алгоритмом Кузнечик-CTR + CMAC (ГОСТ Р 34.13-2015).
 func (p *KuznyechikProvider) Encrypt(ctx context.Context, keyName string, plaintext []byte) (string, error) {
+	start := time.Now()
+	defer func() {
+		p.logger.Debug("Kuznyechik шифрование завершено", "duration", time.Since(start))
+	}()
+
 	key, _, err := p.keyManager.GetOrCreateKey(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get key: %w", err)
@@ -42,12 +49,16 @@ func (p *KuznyechikProvider) Encrypt(ctx context.Context, keyName string, plaint
 		return "", fmt.Errorf("encrypt: %w", err)
 	}
 
-	// Return raw ciphertext as string (server converts to []byte for response)
 	return string(ciphertext), nil
 }
 
-// Decrypt decrypts ciphertext using Kuznyechik-AEAD
+// Decrypt дешифрует и проверяет CMAC-тег (ГОСТ Р 34.13-2015).
 func (p *KuznyechikProvider) Decrypt(ctx context.Context, keyName string, ciphertextStr string) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		p.logger.Debug("Kuznyechik дешифрование завершено", "duration", time.Since(start))
+	}()
+
 	ciphertext := []byte(ciphertextStr)
 
 	key, _, err := p.keyManager.GetOrCreateKey(ctx)

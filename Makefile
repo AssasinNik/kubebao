@@ -58,6 +58,22 @@ test-e2e-quick: ## Run quick E2E tests
 	@echo "$(CYAN)Running quick E2E tests...$(RESET)"
 	./scripts/e2e-test.sh --quick
 
+.PHONY: test-crypto
+test-crypto: ## Run cryptographic tests (GOST)
+	@echo "$(CYAN)Running GOST cipher tests...$(RESET)"
+	go test -v -race -count=3 ./internal/kuznyechik/ ./internal/crypto/
+
+.PHONY: bench
+bench: ## Run benchmarks
+	@echo "$(CYAN)Running benchmarks...$(RESET)"
+	go test -bench=. -benchmem ./internal/kuznyechik/ ./internal/crypto/
+
+.PHONY: security
+security: ## Run security checks
+	@echo "$(CYAN)Running security checks...$(RESET)"
+	go vet ./...
+	@command -v govulncheck >/dev/null 2>&1 && govulncheck ./... || echo "$(YELLOW)govulncheck not installed, skipping$(RESET)"
+
 .PHONY: coverage
 coverage: test ## Generate coverage report
 	@echo "$(CYAN)Generating coverage report...$(RESET)"
@@ -72,17 +88,17 @@ build: build-kms build-csi build-operator ## Build all binaries
 .PHONY: build-kms
 build-kms: ## Build KMS plugin
 	@echo "$(CYAN)Building kubebao-kms...$(RESET)"
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/kubebao-kms ./cmd/kubebao-kms
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kubebao-kms ./cmd/kubebao-kms
 
 .PHONY: build-csi
 build-csi: ## Build CSI provider
 	@echo "$(CYAN)Building kubebao-csi...$(RESET)"
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/kubebao-csi ./cmd/kubebao-csi
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kubebao-csi ./cmd/kubebao-csi
 
 .PHONY: build-operator
 build-operator: ## Build operator
 	@echo "$(CYAN)Building kubebao-operator...$(RESET)"
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/kubebao-operator ./cmd/kubebao-operator
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kubebao-operator ./cmd/kubebao-operator
 
 ##@ Docker
 

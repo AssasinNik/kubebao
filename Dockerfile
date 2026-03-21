@@ -8,44 +8,33 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Install build dependencies
 RUN apk add --no-cache git make
 
-# Copy go mod files
 COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 
-# Download dependencies
-RUN go mod download
-
-# Copy source code
 COPY . .
 
-# Build the binary
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-s -w -X main.Version=${VERSION}" \
+    -trimpath \
     -o /workspace/bin/${COMPONENT} \
     ./cmd/${COMPONENT}
 
-# Runtime stage
+# Runtime stage — distroless-like minimal image
 FROM alpine:3.20
 
 ARG COMPONENT=kubebao-kms
 
-# Install CA certificates for HTTPS connections
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && \
+    apk upgrade --no-cache && \
+    rm -rf /var/cache/apk/*
 
-# Create non-root user
 RUN addgroup -g 10123 -S kubebao && \
-    adduser -u 10123 -S kubebao -G kubebao
+    adduser -u 10123 -S kubebao -G kubebao -h /nonexistent -s /sbin/nologin
 
-# Copy binary from builder
-COPY --from=builder /workspace/bin/${COMPONENT} /usr/local/bin/kubebao
+COPY --from=builder --chown=kubebao:kubebao /workspace/bin/${COMPONENT} /usr/local/bin/kubebao
 
-# Set ownership
-RUN chown kubebao:kubebao /usr/local/bin/kubebao
+USER 10123:10123
 
-# Use non-root user
-USER kubebao
-
-# Default entrypoint
 ENTRYPOINT ["/usr/local/bin/kubebao"]
