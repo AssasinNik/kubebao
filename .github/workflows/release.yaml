@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [kubebao-kms, kubebao-csi, kubebao-operator]
+        component: [kubebao-kms, kubebao-csi, kubebao-operator, kubebao-ui]
     steps:
       - uses: actions/checkout@v4
 
@@ -141,7 +141,7 @@ jobs:
       matrix:
         goos: [linux, darwin]
         goarch: [amd64, arm64]
-        component: [kubebao-kms, kubebao-csi, kubebao-operator]
+        component: [kubebao-kms, kubebao-csi, kubebao-operator, kubebao-ui]
     steps:
       - uses: actions/checkout@v4
 
@@ -211,6 +211,7 @@ jobs:
             docker pull ghcr.io/${{ github.repository_owner }}/kubebao-operator:${{ steps.version.outputs.VERSION }}
             docker pull ghcr.io/${{ github.repository_owner }}/kubebao-kms:${{ steps.version.outputs.VERSION }}
             docker pull ghcr.io/${{ github.repository_owner }}/kubebao-csi:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/${{ github.repository_owner }}/kubebao-ui:${{ steps.version.outputs.VERSION }}
             ```
             
             ### Changelog

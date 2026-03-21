@@ -83,7 +83,7 @@ coverage: test ## Generate coverage report
 ##@ Build
 
 .PHONY: build
-build: build-kms build-csi build-operator ## Build all binaries
+build: build-kms build-csi build-operator build-ui ## Build all binaries
 
 .PHONY: build-kms
 build-kms: ## Build KMS plugin
@@ -100,10 +100,15 @@ build-operator: ## Build operator
 	@echo "$(CYAN)Building kubebao-operator...$(RESET)"
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kubebao-operator ./cmd/kubebao-operator
 
+.PHONY: build-ui
+build-ui: ## Build UI dashboard
+	@echo "$(CYAN)Building kubebao-ui...$(RESET)"
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kubebao-ui ./cmd/kubebao-ui
+
 ##@ Docker
 
 .PHONY: docker-build
-docker-build: docker-build-kms docker-build-csi docker-build-operator ## Build all Docker images
+docker-build: docker-build-kms docker-build-csi docker-build-operator docker-build-ui ## Build all Docker images
 
 .PHONY: docker-build-kms
 docker-build-kms: ## Build KMS Docker image
@@ -126,12 +131,20 @@ docker-build-operator: ## Build operator Docker image
 		--build-arg COMPONENT=kubebao-operator \
 		--build-arg VERSION=$(VERSION) .
 
+.PHONY: docker-build-ui
+docker-build-ui: ## Build UI Docker image
+	@echo "$(CYAN)Building kubebao-ui image...$(RESET)"
+	docker build -t $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-ui:$(VERSION) \
+		--build-arg COMPONENT=kubebao-ui \
+		--build-arg VERSION=$(VERSION) .
+
 .PHONY: docker-push
 docker-push: ## Push Docker images
 	@echo "$(CYAN)Pushing Docker images...$(RESET)"
 	docker push $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-kms:$(VERSION)
 	docker push $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-csi:$(VERSION)
 	docker push $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-operator:$(VERSION)
+	docker push $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-ui:$(VERSION)
 
 .PHONY: docker-buildx
 docker-buildx: ## Build multi-arch Docker images
@@ -145,6 +158,9 @@ docker-buildx: ## Build multi-arch Docker images
 	docker buildx build --platform $(PLATFORMS) \
 		-t $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-operator:$(VERSION) \
 		--build-arg COMPONENT=kubebao-operator --push .
+	docker buildx build --platform $(PLATFORMS) \
+		-t $(REGISTRY)/$(IMAGE_PREFIX)/kubebao-ui:$(VERSION) \
+		--build-arg COMPONENT=kubebao-ui --push .
 
 ##@ Helm
 

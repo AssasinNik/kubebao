@@ -24,7 +24,7 @@ global:
   # Image settings
   image:
     # Container registry (e.g., ghcr.io/your-username)
-    registry: ghcr.io/kubebao
+    registry: ghcr.io/assasinnik
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion
     tag: ""
@@ -225,6 +225,66 @@ operator:
       type: RuntimeDefault
   
   # Container security context (hardened)
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# UI Dashboard settings
+ui:
+  enabled: true
+
+  name: kubebao-ui
+
+  replicaCount: 1
+
+  image:
+    repository: kubebao/kubebao-ui
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8443
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    hosts:
+      - host: kubebao.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # Resources
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10123
+    runAsGroup: 10123
+    fsGroup: 10123
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Container security context
   containerSecurityContext:
     allowPrivilegeEscalation: false
     capabilities:

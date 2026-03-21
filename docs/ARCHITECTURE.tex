@@ -1,0 +1,468 @@
+\documentclass[a4paper,14pt]{extarticle}
+\usepackage[utf8]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[russian]{babel}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{indentfirst}
+\usepackage{tikz}
+\usepackage{enumitem}
+
+\geometry{left=3cm,right=1.5cm,top=2cm,bottom=2cm}
+\setlength{\parindent}{1.25cm}
+\linespread{1.5}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red!80!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    tabsize=2
+}
+
+\begin{document}
+
+\section{Архитектура KubeBao: техническая реализация}
+
+\subsection{Обзор системы}
+
+KubeBao~--- Kubernetes-оператор для управления секретами через OpenBao (форк HashiCorp Vault). Система обеспечивает:
+
+\begin{itemize}
+    \item \textbf{Шифрование секретов etcd} через KMS Plugin API v2 (Kubernetes 1.25+) с использованием блочного шифра <<Кузнечик>> (ГОСТ~Р~34.12-2015);
+    \item \textbf{Синхронизацию секретов} из OpenBao KV в Kubernetes Secrets через CRD \texttt{BaoSecret};
+    \item \textbf{Декларативное управление политиками} OpenBao через CRD \texttt{BaoPolicy};
+    \item \textbf{Монтирование секретов в поды} через Secrets Store CSI Driver.
+\end{itemize}
+
+Все криптографические операции выполняются собственной реализацией алгоритмов ГОСТ, без использования сторонних криптографических библиотек.
+
+\subsection{Компонентная архитектура}
+
+\begin{table}[h]
+\centering
+\caption{Компоненты системы KubeBao}
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Компонент} & \textbf{Тип} & \textbf{Назначение} \\
+\midrule
+\texttt{kubebao-kms} & DaemonSet & KMS Plugin v2~--- шифрование/дешифрование секретов etcd \\
+\texttt{kubebao-operator} & Deployment & Kubernetes Operator~--- управление CRD (BaoSecret, BaoPolicy) \\
+\texttt{kubebao-csi} & DaemonSet & Secrets Store CSI Provider~--- монтирование секретов в файловую систему подов \\
+\texttt{kubebao-ui} & Deployment & Веб-интерфейс управления и мониторинга \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Математические основы криптографической подсистемы}
+
+\subsubsection{Блочный шифр <<Кузнечик>> (ГОСТ~Р~34.12-2015)}
+
+\paragraph{Параметры шифра.}
+
+Блочный шифр <<Кузнечик>> определён стандартом ГОСТ~Р~34.12-2015 (также описан в RFC~7801). Основные параметры:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Параметр & Значение \\
+\midrule
+Размер блока ($n$) & 128 бит (16 байт) \\
+Размер ключа ($k$) & 256 бит (32 байт) \\
+Число раундов & 10 \\
+Структура & SP-сеть (подстановочно-перестановочная) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Алгебраическая структура.}
+
+Шифр работает в поле Галуа $\mathrm{GF}(2^8)$ с неприводимым полиномом:
+\begin{equation}
+    p(x) = x^8 + x^7 + x^6 + x + 1
+\end{equation}
+
+Двоичное представление: \texttt{0x1C3}. Элементы поля~--- байты, операции (сложение~--- XOR, умножение~--- по модулю $p(x)$) используются в линейном преобразовании~$L$.
+
+\paragraph{Нелинейное преобразование $S$ (подстановка).}
+
+Нелинейное преобразование $S$ применяет фиксированную подстановку $\pi$ к каждому байту блока:
+\begin{equation}
+    S: V_{128} \to V_{128}, \quad S(a) = (\pi(a_{15}), \pi(a_{14}), \ldots, \pi(a_0))
+\end{equation}
+где $\pi: V_8 \to V_8$~--- фиксированная S-box таблица размером 256 элементов, определённая стандартом.
+
+Свойства таблицы $\pi$:
+\begin{itemize}
+    \item высокая нелинейность (расстояние от аффинных функций $\geq 104$);
+    \item алгебраическая степень 7;
+    \item дифференциальная вероятность $\leq 2^{-6}$.
+\end{itemize}
+
+\paragraph{Линейное преобразование $L$.}
+
+Линейное преобразование $L$ определяется через регистр сдвига с линейной обратной связью (LFSR) на основе функции~$l$:
+\begin{equation}
+    l(a) = \bigoplus_{i=0}^{15} k_i \cdot a_i \pmod{p(x)}
+\end{equation}
+где коэффициенты $k_i$~--- фиксированные элементы $\mathrm{GF}(2^8)$:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}c|cccccccccccccccc@{}}
+\toprule
+$i$ & 0 & 1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 & 13 & 14 & 15 \\
+\midrule
+$k_i$ & 148 & 32 & 133 & 16 & 194 & 192 & 1 & 251 & 1 & 192 & 194 & 16 & 133 & 32 & 148 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Преобразование $R$:
+\begin{equation}
+    R(a_{15}, \ldots, a_0) = (l(a_{15}, \ldots, a_0), a_{15}, a_{14}, \ldots, a_1)
+\end{equation}
+
+Преобразование $L$~--- 16-кратное применение $R$:
+\begin{equation}
+    L = R^{16}
+\end{equation}
+
+Это гарантирует MDS-свойство (Maximum Distance Separable): минимальное число активных S-box в любой дифференциальной характеристике составляет~17.
+
+\paragraph{Развёртка ключа.}
+
+Из 256-битного мастер-ключа $K = (K_1 \| K_2)$ вырабатываются 10 раундовых ключей $k_1, \ldots, k_{10}$:
+\begin{equation}
+    k_1 = K_1, \quad k_2 = K_2
+\end{equation}
+
+Для $i = 1, \ldots, 4$ (по 8 итераций Фейстеля на каждую пару):
+\begin{equation}
+    F[C_j](A, B) = (LSX[C_j](A) \oplus B, \; A)
+\end{equation}
+где $C_j$~--- итерационные константы, предвычисленные из $L$-преобразования:
+\begin{equation}
+    C_j = L(\mathrm{enc}(j))
+\end{equation}
+
+Функция $F$ реализует раунд сети Фейстеля:
+\begin{equation}
+    (A', B') = F[C](A, B) = (L(S(A \oplus C)) \oplus B, \; A)
+\end{equation}
+
+Каждая группа из 8 Фейстель-раундов порождает 2 новых раундовых ключа, итого 8 дополнительных ключей ($4 \text{ группы} \times 2 \text{ ключа}$).
+
+\paragraph{Шифрование блока.}
+
+Шифрование блока открытого текста $a \in V_{128}$:
+\begin{align}
+    a_0 &= a \\
+    a_i &= LSX[k_i](a_{i-1}) = L(S(a_{i-1} \oplus k_i)), \quad i = 1, \ldots, 9 \\
+    b &= X[k_{10}](a_9) = a_9 \oplus k_{10}
+\end{align}
+где:
+\begin{itemize}
+    \item $X[k](a) = a \oplus k$~--- сложение с раундовым ключом (Key Addition);
+    \item $S$~--- нелинейная подстановка;
+    \item $L$~--- линейное преобразование.
+\end{itemize}
+
+\paragraph{Табличная оптимизация реализации.}
+
+В реализации KubeBao используется табличная оптимизация: совмещённые таблицы подстановки и линейного преобразования (Combined S-box + L-transform lookup). Для каждой из 16 байтовых позиций предвычислена таблица размером $256 \times 2$ (\texttt{uint64}):
+\begin{equation}
+    t[\mathrm{pos}][\mathrm{byte\_value}] = L\text{-transform contribution for } S(\mathrm{byte\_value}) \text{ at position pos}
+\end{equation}
+
+Это позволяет вычислить $L(S(\cdot))$ одним проходом XOR из 16 табличных значений, заменяя $16 \times 16$ операций умножения в поле Галуа на 16 обращений к таблице.
+
+\subsubsection{Режим гаммирования CTR (ГОСТ~Р~34.13-2015, раздел~5.5)}
+
+\paragraph{Определение.}
+
+Режим CTR (Counter) превращает блочный шифр в потоковый. Согласно ГОСТ~Р~34.13-2015:
+
+Зашифрование:
+\begin{equation}
+    C_i = P_i \oplus E_K(\mathrm{CTR}_i), \quad i = 1, \ldots, q
+\end{equation}
+
+Расшифрование:
+\begin{equation}
+    P_i = C_i \oplus E_K(\mathrm{CTR}_i), \quad i = 1, \ldots, q
+\end{equation}
+где:
+\begin{itemize}
+    \item $E_K$~--- функция зашифрования блочным шифром <<Кузнечик>> с ключом $K$;
+    \item $P_i$~--- $i$-й блок открытого текста;
+    \item $C_i$~--- $i$-й блок шифротекста;
+    \item $\mathrm{CTR}_i$~--- $i$-й счётчик;
+    \item $q = \lceil |P| / n \rceil$~--- число полных и неполных блоков.
+\end{itemize}
+
+\paragraph{Структура счётчика.}
+
+128-битный счётчик разбивается на две половины:
+\begin{equation}
+    \mathrm{CTR} = \mathrm{CTR}_{\mathrm{upper}} \| \mathrm{CTR}_{\mathrm{lower}}
+\end{equation}
+
+\begin{itemize}
+    \item \textbf{Верхние 64 бита} ($\mathrm{CTR}_{\mathrm{upper}}$)~--- инициализационный вектор (IV), фиксирован в пределах одного шифрования;
+    \item \textbf{Нижние 64 бита} ($\mathrm{CTR}_{\mathrm{lower}}$)~--- инкрементируемый счётчик.
+\end{itemize}
+
+Функция инкремента (по ГОСТ~Р~34.13-2015, $s = n/2 = 64$):
+\begin{equation}
+    \mathrm{CTR}_{i+1} = \mathrm{CTR}_{\mathrm{upper}} \| (\mathrm{CTR}_{\mathrm{lower}} + 1 \bmod 2^{64})
+\end{equation}
+
+Верхние 64 бита \textbf{не изменяются} при инкременте~--- это гарантирует, что счётчик не может переполниться в пределах $2^{64}$ блоков ($\approx 295$ эксабайт для 128-битного блока).
+
+\paragraph{Обработка последнего блока.}
+
+Если длина открытого текста не кратна размеру блока, последний блок обрабатывается усечённой гаммой:
+\begin{equation}
+    C_q = P_q \oplus \mathrm{MSB}_{|P_q|}(E_K(\mathrm{CTR}_q))
+\end{equation}
+где $\mathrm{MSB}_r(\cdot)$~--- старшие $r$ бит.
+
+\subsubsection{Алгоритм выработки имитовставки CMAC (ГОСТ~Р~34.13-2015, раздел~5.6)}
+
+\paragraph{Определение.}
+
+CMAC (Cipher-based Message Authentication Code) обеспечивает целостность и аутентичность данных. Определён в ГОСТ~Р~34.13-2015.
+
+Длина выходного значения (тега): $|T| = n = 128$ бит.
+
+\paragraph{Генерация подключей.}
+
+Из ключа $K$ генерируются два подключа $K_1, K_2$:
+
+\begin{enumerate}
+    \item Вычислить $L = E_K(0^n)$~--- зашифрование нулевого блока.
+    \item Подключ $K_1$:
+    \begin{equation}
+        K_1 = \begin{cases}
+            L \ll 1 & \text{если } \mathrm{MSB}(L) = 0 \\
+            (L \ll 1) \oplus R_b & \text{если } \mathrm{MSB}(L) = 1
+        \end{cases}
+    \end{equation}
+    \item Подключ $K_2$:
+    \begin{equation}
+        K_2 = \begin{cases}
+            K_1 \ll 1 & \text{если } \mathrm{MSB}(K_1) = 0 \\
+            (K_1 \ll 1) \oplus R_b & \text{если } \mathrm{MSB}(K_1) = 1
+        \end{cases}
+    \end{equation}
+\end{enumerate}
+где:
+\begin{itemize}
+    \item $\ll 1$~--- побитовый сдвиг влево на 1 позицию;
+    \item $R_b = 0^{120} \| 10000111_2 = \texttt{0x00\ldots0087}$~--- полином приведения для $\mathrm{GF}(2^{128})$.
+\end{itemize}
+
+Полином $R_b$ соответствует:
+\begin{equation}
+    x^{128} + x^7 + x^2 + x + 1
+\end{equation}
+
+Это минимальный неприводимый полином степени~128 над $\mathrm{GF}(2)$, что гарантирует максимальный период генератора подключей.
+
+\paragraph{Вычисление CMAC.}
+
+Для сообщения $M = M_1 \| M_2 \| \ldots \| M_q$:
+
+\begin{enumerate}
+    \item \textbf{Инициализация:} $X_0 = 0^n$
+    \item \textbf{Обработка полных блоков} ($i = 1, \ldots, q-1$):
+    \begin{equation}
+        X_i = E_K(X_{i-1} \oplus M_i)
+    \end{equation}
+    \item \textbf{Обработка последнего блока:}
+    \begin{itemize}
+        \item Если последний блок полный ($|M_q| = n$):
+        \begin{equation}
+            T = E_K(X_{q-1} \oplus M_q \oplus K_1)
+        \end{equation}
+        \item Если последний блок неполный ($|M_q| < n$):
+        \begin{equation}
+            M_q^* = M_q \| 1 \| 0^{n - |M_q| - 1} \quad \text{(padding 10*)}
+        \end{equation}
+        \begin{equation}
+            T = E_K(X_{q-1} \oplus M_q^* \oplus K_2)
+        \end{equation}
+    \end{itemize}
+\end{enumerate}
+
+В KubeBao CMAC вычисляется от конкатенации IV и шифротекста:
+\begin{equation}
+    T = \mathrm{CMAC}_{K_{\mathrm{mac}}}(\mathrm{IV} \| C)
+\end{equation}
+
+Это обеспечивает аутентификацию как шифротекста, так и IV.
+
+\subsection{Реализация AEAD-схемы}
+
+\subsubsection{Схема Encrypt-then-MAC}
+
+KubeBao использует схему \textbf{Encrypt-then-MAC} (EtM)~--- доказуемо стойкую композицию шифрования и аутентификации при использовании независимых ключей.
+
+\textbf{Теорема (Bellare \& Namprempre, 2000):} Если $\mathrm{Enc}$~--- IND-CPA-стойкая схема шифрования, а $\mathrm{MAC}$~--- SUF-CMA-стойкий код аутентификации, то конструкция EtM с независимыми ключами является IND-CCA-стойкой и INT-CTXT-стойкой.
+
+\subsubsection{Вывод ключей (Key Derivation)}
+
+Из 256-битного мастер-ключа $K_{\mathrm{master}}$ выводятся два независимых 256-битных ключа:
+\begin{align}
+    K_{\mathrm{enc}} &= \mathrm{SHA\text{-}256}(\text{``kubebao-kuznyechik-enc''} \| \texttt{0x00} \| K_{\mathrm{master}}) \\
+    K_{\mathrm{mac}} &= \mathrm{SHA\text{-}256}(\text{``kubebao-kuznyechik-mac''} \| \texttt{0x00} \| K_{\mathrm{master}})
+\end{align}
+
+Разделение доменов (domain separation) обеспечивается:
+\begin{enumerate}
+    \item уникальными строковыми префиксами;
+    \item нулевым байтом-разделителем \texttt{0x00}.
+\end{enumerate}
+
+Это гарантирует, что $K_{\mathrm{enc}} \neq K_{\mathrm{mac}}$ с подавляющей вероятностью, а компрометация одного ключа не раскрывает другой.
+
+\subsubsection{Формат шифротекста}
+
+\begin{table}[h]
+\centering
+\caption{Формат выходных данных AEAD}
+\begin{tabular}{@{}llp{8cm}@{}}
+\toprule
+\textbf{Поле} & \textbf{Размер} & \textbf{Описание} \\
+\midrule
+\texttt{version} & 1 байт & Версия формата (\texttt{0x01}) \\
+\texttt{IV} & 16 байт & Случайный инициализационный вектор (CSPRNG) \\
+\texttt{ciphertext} & $|P|$ байт & Шифротекст (Кузнечик-CTR) \\
+\texttt{CMAC tag} & 16 байт & Тег аутентификации (Кузнечик-CMAC) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Overhead: 33 байта ($1 + 16 + 16$).
+
+\subsubsection{Алгоритм шифрования}
+
+\begin{enumerate}
+    \item $\mathrm{IV} \leftarrow \mathrm{CSPRNG}(128)$ \hfill\textit{// 16 случайных байт}
+    \item $K_{\mathrm{enc}}, K_{\mathrm{mac}} \leftarrow \mathrm{DeriveKeys}(K_{\mathrm{master}})$ \hfill\textit{// SHA-256 с доменным разделением}
+    \item $C \leftarrow \text{Кузнечик-CTR}(K_{\mathrm{enc}}, \mathrm{IV}, P)$ \hfill\textit{// ГОСТ~Р~34.13-2015}
+    \item $T \leftarrow \text{Кузнечик-CMAC}(K_{\mathrm{mac}}, \mathrm{IV} \| C)$ \hfill\textit{// ГОСТ~Р~34.13-2015}
+    \item \textbf{return} $\texttt{0x01} \| \mathrm{IV} \| C \| T$
+\end{enumerate}
+
+\subsubsection{Алгоритм дешифрования}
+
+\begin{enumerate}
+    \item Разобрать $\mathrm{data} \to \mathrm{version}, \mathrm{IV}, C, T$
+    \item Проверить $\mathrm{version} = \texttt{0x01}$
+    \item $K_{\mathrm{enc}}, K_{\mathrm{mac}} \leftarrow \mathrm{DeriveKeys}(K_{\mathrm{master}})$
+    \item $T' \leftarrow \text{Кузнечик-CMAC}(K_{\mathrm{mac}}, \mathrm{IV} \| C)$
+    \item \textbf{Если} $\mathrm{ConstantTimeCompare}(T, T') \neq 1$ \textbf{то} ОШИБКА
+    \item $P \leftarrow \text{Кузнечик-CTR}(K_{\mathrm{enc}}, \mathrm{IV}, C)$
+    \item \textbf{return} $P$
+\end{enumerate}
+
+Шаг~5 использует \textbf{постоянно-временное сравнение} (\texttt{crypto/subtle.ConstantTimeCompare}) для предотвращения timing-атак.
+
+\subsubsection{Свойства безопасности}
+
+\begin{table}[h]
+\centering
+\caption{Гарантии безопасности AEAD-схемы}
+\begin{tabular}{@{}lp{10cm}@{}}
+\toprule
+\textbf{Свойство} & \textbf{Гарантия} \\
+\midrule
+Конфиденциальность (IND-CPA) & Кузнечик-CTR с уникальным IV \\
+Целостность (INT-CTXT) & $\mathrm{CMAC}(\mathrm{IV} \| C)$ покрывает все изменяемые поля \\
+Аутентичность (EUF-CMA) & 128-битный CMAC-тег \\
+Стойкость к подмене IV & IV включён во вход CMAC \\
+Стойкость к timing-атакам & \texttt{ConstantTimeCompare} при проверке тега \\
+Независимость ключей & Доменное разделение при выводе \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Управление ключами}
+
+\subsubsection{Хранение в OpenBao KV}
+
+Ключи хранятся в OpenBao KV v2 по пути:
+\begin{verbatim}
+secret/data/{kvPathPrefix}/{keyName}
+\end{verbatim}
+
+Формат записи:
+\begin{lstlisting}[language=]
+{
+  "key": "<base64-encoded-256-bit-key>",
+  "version": 1
+}
+\end{lstlisting}
+
+\subsubsection{Кэширование и защита в памяти}
+
+\texttt{KeyManager} реализует:
+\begin{enumerate}
+    \item \textbf{Двойную проверку блокировки} (double-checked locking) при чтении ключа: \texttt{RLock} $\to$ проверка кэша $\to$ \texttt{RUnlock}; при промахе: \texttt{Lock} $\to$ повторная проверка $\to$ чтение из OpenBao $\to$ \texttt{Unlock}.
+    \item \textbf{Копирование ключа} при выдаче: вызывающий код получает копию, а не ссылку на кэш.
+    \item \textbf{Зануление памяти} (\texttt{zeroSlice}, \texttt{zeroBytes}) после использования ключевого материала через \texttt{defer}.
+    \item \textbf{Инвалидация кэша} (\texttt{InvalidateCache})~--- зануляет ключ в памяти перед удалением ссылки.
+\end{enumerate}
+
+\subsubsection{Ротация ключей}
+
+При записи нового ключа в OpenBao KV (с \texttt{version: N+1}):
+\begin{enumerate}
+    \item \texttt{healthCheckLoop} (каждые 30 секунд) обнаруживает изменение версии;
+    \item обновляется \texttt{keyID} в KMS-сервере;
+    \item Kubernetes вызывает re-encryption секретов при изменении \texttt{keyID} в \texttt{StatusResponse};
+    \item новые секреты шифруются новым ключом;
+    \item старый ключ остаётся доступным для дешифрования существующих секретов.
+\end{enumerate}
+
+\subsection{Криптографическая стойкость}
+
+\begin{table}[h]
+\centering
+\caption{Параметры криптографической стойкости}
+\begin{tabular}{@{}llp{7cm}@{}}
+\toprule
+\textbf{Параметр} & \textbf{Значение} & \textbf{Обоснование} \\
+\midrule
+Стойкость ключа & 256 бит & Квантово-устойчивый ($\geq 128$ бит post-quantum) \\
+Стойкость блока & 128 бит & MDS-свойство $L$: 17 активных S-box \\
+Стойкость CMAC & 128 бит & Birthday bound: $2^{64}$ запросов \\
+Стойкость CTR & $2^{64}$ блоков/IV & Один IV $\to$ $\approx 295$ ЭБ \\
+Вывод ключей & SHA-256 & Доменное разделение; PRF-свойство \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

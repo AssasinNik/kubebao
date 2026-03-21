@@ -122,6 +122,22 @@ Get the image for a component
 {{- end }}
 
 {{/*
+UI component labels
+*/}}
+{{- define "kubebao.ui.labels" -}}
+{{ include "kubebao.labels" . }}
+app.kubernetes.io/component: ui
+{{- end }}
+
+{{/*
+UI selector labels
+*/}}
+{{- define "kubebao.ui.selectorLabels" -}}
+{{ include "kubebao.selectorLabels" . }}
+app.kubernetes.io/component: ui
+{{- end }}
+
+{{/*
 OpenBao address
 */}}
 {{- define "kubebao.openbaoAddress" -}}

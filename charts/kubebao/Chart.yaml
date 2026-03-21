@@ -12,12 +12,11 @@ keywords:
   - kms
   - csi
   - encryption
-home: https://github.com/kubebao/kubebao
+home: https://github.com/AssasinNik/kubebao
 sources:
-  - https://github.com/kubebao/kubebao
+  - https://github.com/AssasinNik/kubebao
 maintainers:
-  - name: KubeBao Authors
-    email: maintainers@kubebao.io
+  - name: AssasinNik
 # Note: secrets-store-csi-driver должен быть установлен отдельно
 # helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver -n kubebao-system
 annotations:

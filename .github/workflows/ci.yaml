@@ -108,7 +108,7 @@ jobs:
     needs: [lint, test, crypto-tests, security]
     strategy:
       matrix:
-        component: [kubebao-kms, kubebao-csi, kubebao-operator]
+        component: [kubebao-kms, kubebao-csi, kubebao-operator, kubebao-ui]
     steps:
       - uses: actions/checkout@v4
 
@@ -144,7 +144,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        component: [kubebao-kms, kubebao-csi, kubebao-operator]
+        component: [kubebao-kms, kubebao-csi, kubebao-operator, kubebao-ui]
     steps:
       - uses: actions/checkout@v4
 
