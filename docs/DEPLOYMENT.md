@@ -593,7 +593,14 @@ helm repo update
 helm install kubebao kubebao/kubebao \
   --namespace kubebao-system --create-namespace \
   --set global.openbao.address="http://openbao.openbao.svc.cluster.local:8200" \
-  --set global.openbao.role=kubebao
+  --set global.openbao.role=kubebao \
+  --set global.image.registry="ghcr.io/assasinnik" \
+  --set global.image.tag=latest \
+  --set kms.image.repository=kubebao-kms \
+  --set csi.image.repository=kubebao-csi \
+  --set operator.image.repository=kubebao-operator \
+  --set ui.image.repository=kubebao-ui \
+  --set csi.driver.install=false
 ```
 
 ### 5.6 Проверка установки
