@@ -600,6 +600,7 @@ helm install kubebao kubebao/kubebao \
   --set csi.image.repository=kubebao-csi \
   --set operator.image.repository=kubebao-operator \
   --set ui.image.repository=kubebao-ui \
+  --set kms.encryptionProvider=kuznyechik \
   --set csi.driver.install=false
 ```
 
