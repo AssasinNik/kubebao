@@ -235,7 +235,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	defer func() { _ = listener.Close() }()
 
-	if err := os.Chmod(s.config.SocketPath, 0600); err != nil {
+	if err := os.Chmod(s.config.SocketPath, 0666); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 

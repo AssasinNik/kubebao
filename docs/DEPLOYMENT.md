@@ -88,15 +88,38 @@ kubectl get nodes
 
 ### 2.2 Для локальной разработки (Rancher Desktop / Docker Desktop / minikube)
 
-**Rancher Desktop:**
+**Rancher Desktop (рекомендуется для macOS/Linux):**
+
 1. Установите [Rancher Desktop](https://rancherdesktop.io/)
-2. Settings → Kubernetes: **ON**, Container runtime: **dockerd (moby)**
-3. Дождитесь: Kubernetes: Running
+2. Откройте настройки:
+   - **Preferences → Kubernetes**: включите Kubernetes
+   - **Preferences → Container Engine**: выберите **dockerd (moby)** — это обязательно для `docker build` и `docker save`
+3. Дождитесь статуса: **Kubernetes: Running** (зелёная иконка в трее)
+4. Проверьте:
+
+```bash
+kubectl get nodes
+# NAME                   STATUS   ROLES           AGE   VERSION
+# lima-rancher-desktop   Ready    control-plane   5m    v1.34.x+k3s1
+```
+
+> **Важно:** Rancher Desktop использует **k3s** внутри Lima VM. Это значит:
+> - Docker-образы, собранные на хосте (`docker build`), **не видны** Kubernetes-ноде
+> - Для загрузки образов в кластер: `docker save <image> | rdctl shell -- docker load`
+> - Для настройки kube-apiserver: через `/etc/rancher/k3s/config.yaml` внутри VM
+> - Для доступа в VM: `rdctl shell` (как пользователь) или `rdctl shell -- sudo ...` (как root)
 
 **minikube:**
+
 ```bash
 minikube start --cpus=4 --memory=8192 --driver=docker
 ```
+
+> Для загрузки локальных образов: `minikube image load <image>`
+
+**Docker Desktop:**
+
+Включите Kubernetes в Settings → Kubernetes → Enable. Локальные Docker-образы доступны Kubernetes автоматически.
 
 ### 2.3 Создание namespaces
 
@@ -912,7 +935,30 @@ helm upgrade kubebao ./charts/kubebao \
 
 ### 7.1 Создание EncryptionConfiguration
 
-На **каждом control-plane узле** создайте файл:
+Этот файл одинаков для всех платформ. Его нужно разместить **на control-plane узле** (внутри VM для Rancher Desktop):
+
+**Rancher Desktop / k3s:**
+
+```bash
+rdctl shell -- sudo mkdir -p /etc/kubernetes
+
+rdctl shell -- sudo tee /etc/kubernetes/encryption-config.yaml << 'EOF'
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+      - secrets
+    providers:
+      - kms:
+          apiVersion: v2
+          name: kubebao-kms
+          endpoint: unix:///var/run/kubebao/kms.sock
+          timeout: 10s
+      - identity: {}
+EOF
+```
+
+**kubeadm / стандартный кластер:**
 
 ```bash
 sudo tee /etc/kubernetes/encryption-config.yaml << 'EOF'
@@ -931,7 +977,35 @@ resources:
 EOF
 ```
 
-### 7.2 Обновление kube-apiserver
+### 7.2 Настройка kube-apiserver
+
+#### Вариант А: Rancher Desktop / k3s
+
+k3s использует встроенный kube-apiserver (не static pod). Конфигурация через файл `/etc/rancher/k3s/config.yaml`:
+
+```bash
+rdctl shell -- sudo tee /etc/rancher/k3s/config.yaml << 'EOF'
+kube-apiserver-arg:
+  - "encryption-provider-config=/etc/kubernetes/encryption-config.yaml"
+EOF
+```
+
+Перезапустите k3s:
+
+```bash
+rdctl shell -- sudo rc-service k3s restart
+```
+
+> **Важно:** после перезапуска k3s все поды перезапустятся. Подождите 30–60 секунд, пока кластер стабилизируется.
+
+Проверьте, что kube-apiserver подхватил флаг:
+
+```bash
+grep "encryption-provider-config" ~/Library/Logs/rancher-desktop/k3s.log | tail -1
+# Должна быть строка: --encryption-provider-config=/etc/kubernetes/encryption-config.yaml
+```
+
+#### Вариант Б: kubeadm (стандартный кластер)
 
 Добавьте в манифест `/etc/kubernetes/manifests/kube-apiserver.yaml`:
 
@@ -961,20 +1035,88 @@ spec:
       type: DirectoryOrCreate
 ```
 
-### 7.3 Перезапуск kube-apiserver
+kube-apiserver перезапустится автоматически (static pod).
 
-kube-apiserver перезапустится автоматически после изменения static pod manifest. Проверьте:
+### 7.3 Проверка подключения KMS
+
+После перезапуска kube-apiserver должен подключиться к KMS-сокету. Убедитесь, что KMS-под работает:
 
 ```bash
-kubectl get pods -n kube-system -l component=kube-apiserver
+kubectl get pods -n kubebao-system -l app=kubebao-kms
+# NAME                READY   STATUS    RESTARTS   AGE
+# kubebao-kms-xxxxx   1/1     Running   0          2m
 ```
+
+Проверьте healthz:
+
+```bash
+kubectl get --raw /healthz 2>&1 | tr '\\n' '\n' | grep kms
+# [+]kms-providers ok
+```
+
+Если видите `[-]kms-providers failed` — проверьте:
+
+```bash
+# 1. Сокет существует?
+rdctl shell -- sudo ls -la /var/run/kubebao/kms.sock
+
+# 2. Права доступа: должно быть srwxrwxrwx (0666)
+# Если srw------- (0600) — KMS-под нужно перезапустить:
+kubectl delete pod -n kubebao-system -l app=kubebao-kms
+
+# 3. KMS-логи:
+kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
+```
+
+> **Примечание:** при первом запуске KMS создаёт 256-битный ключ Кузнечика в OpenBao KV при поступлении первого запроса шифрования. Можно создать ключ вручную (см. раздел 7.5).
 
 ### 7.4 Перешифровка существующих секретов
 
-Все **новые** секреты будут шифроваться через KMS. Для перешифровки **существующих**:
+Все **новые** секреты будут шифроваться через KMS автоматически. Для перешифровки **существующих**:
 
 ```bash
 kubectl get secrets --all-namespaces -o json | kubectl replace -f -
+```
+
+Проверьте логи KMS — должны появиться записи шифрования:
+
+```bash
+kubectl logs -n kubebao-system -l app=kubebao-kms --tail=10
+# Запрос шифрования uid=... plaintextSize=...
+# Шифрование выполнено успешно uid=... ciphertextSize=...
+```
+
+### 7.5 Создание ключа шифрования вручную (опционально)
+
+KMS создаёт ключ автоматически при первом запросе. Если хотите создать заранее:
+
+```bash
+# Убедитесь что port-forward к OpenBao работает (раздел 4.1)
+
+# Сгенерировать 256-битный ключ и записать в OpenBao KV
+NEW_KEY=$(openssl rand -base64 32)
+
+curl -s -X POST "http://127.0.0.1:8200/v1/secret/data/kubebao/kms-keys/kubebao-kms" \
+  -H "X-Vault-Token: $BAO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"data\":{\"key\":\"$NEW_KEY\",\"version\":1}}"
+
+# Проверка
+curl -s "http://127.0.0.1:8200/v1/secret/data/kubebao/kms-keys/kubebao-kms" \
+  -H "X-Vault-Token: $BAO_TOKEN" | jq '.data.data'
+# {"key": "xxxxxxx==", "version": 1}
+```
+
+Или через `bao` CLI внутри пода:
+
+```bash
+kubectl exec -n openbao openbao-0 -- sh -c '
+  export BAO_ADDR=http://127.0.0.1:8200
+  export BAO_TOKEN=<ваш-токен>
+  KEY=$(openssl rand -base64 32)
+  bao kv put secret/kubebao/kms-keys/kubebao-kms key="$KEY" version=1
+  bao kv get secret/kubebao/kms-keys/kubebao-kms
+'
 ```
 
 ---
