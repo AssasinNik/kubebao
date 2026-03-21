@@ -8,7 +8,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-03-21T15:36:02.025017854Z"
+    created: "2026-03-21T15:39:20.624334384Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 6ebf43482307f018d164bf3a62896659fb304bab9eff78e70c292d6173c60530
     home: https://github.com/kubebao/kubebao
@@ -37,7 +37,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-03-21T15:36:02.025697844Z"
+    created: "2026-03-21T15:39:20.624995771Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 6ebf43482307f018d164bf3a62896659fb304bab9eff78e70c292d6173c60530
     home: https://github.com/kubebao/kubebao
@@ -65,8 +65,36 @@ entries:
       artifacthub.io/operator: "true"
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
+    appVersion: 0.1.0-dev.ec72f4d
+    created: "2026-03-21T15:39:20.623659321Z"
+    description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
+    digest: 54ba08ad31b457505a13892ef289fa0fb21358de9dfe60ae084d88e1a6463c38
+    home: https://github.com/AssasinNik/kubebao
+    keywords:
+    - kubernetes
+    - secrets
+    - openbao
+    - vault
+    - kms
+    - csi
+    - encryption
+    maintainers:
+    - name: AssasinNik
+    name: kubebao
+    sources:
+    - https://github.com/AssasinNik/kubebao
+    type: application
+    urls:
+    - https://AssasinNik.github.io/kubebao/kubebao-0.1.0-dev.ec72f4d.tgz
+    version: 0.1.0-dev.ec72f4d
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+      artifacthub.io/operatorCapabilities: Full Lifecycle
+    apiVersion: v2
     appVersion: 0.1.0-dev.e5e4144
-    created: "2026-03-21T15:36:02.024307337Z"
+    created: "2026-03-21T15:39:20.622824941Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 7cfefb2605ec84edeb79f25627e377b9bd172858678e219eed28e4b6d5feabe7
     home: https://github.com/AssasinNik/kubebao
@@ -94,7 +122,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.485f890
-    created: "2026-03-21T15:36:02.023433364Z"
+    created: "2026-03-21T15:39:20.622000579Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 11019300928e9a8726b4f8d21746a0af7e61fc29afe3640e12be880251666f43
     home: https://github.com/AssasinNik/kubebao
@@ -115,4 +143,4 @@ entries:
     urls:
     - https://AssasinNik.github.io/kubebao/kubebao-0.1.0-dev.485f890.tgz
     version: 0.1.0-dev.485f890
-generated: "2026-03-21T15:36:02.022399443Z"
+generated: "2026-03-21T15:39:20.620978978Z"
