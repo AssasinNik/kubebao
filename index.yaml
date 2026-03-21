@@ -8,7 +8,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-03-21T14:10:40.208149733Z"
+    created: "2026-03-21T14:34:57.717234393Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 6ebf43482307f018d164bf3a62896659fb304bab9eff78e70c292d6173c60530
     home: https://github.com/kubebao/kubebao
@@ -37,7 +37,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-03-21T14:10:40.208812054Z"
+    created: "2026-03-21T14:34:57.717892615Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 6ebf43482307f018d164bf3a62896659fb304bab9eff78e70c292d6173c60530
     home: https://github.com/kubebao/kubebao
@@ -66,7 +66,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.e5e4144
-    created: "2026-03-21T14:10:40.207446676Z"
+    created: "2026-03-21T14:34:57.716555443Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 7cfefb2605ec84edeb79f25627e377b9bd172858678e219eed28e4b6d5feabe7
     home: https://github.com/AssasinNik/kubebao
@@ -87,4 +87,32 @@ entries:
     urls:
     - https://AssasinNik.github.io/kubebao/kubebao-0.1.0-dev.e5e4144.tgz
     version: 0.1.0-dev.e5e4144
-generated: "2026-03-21T14:10:40.206362976Z"
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+      artifacthub.io/operatorCapabilities: Full Lifecycle
+    apiVersion: v2
+    appVersion: 0.1.0-dev.485f890
+    created: "2026-03-21T14:34:57.71569854Z"
+    description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
+    digest: 11019300928e9a8726b4f8d21746a0af7e61fc29afe3640e12be880251666f43
+    home: https://github.com/AssasinNik/kubebao
+    keywords:
+    - kubernetes
+    - secrets
+    - openbao
+    - vault
+    - kms
+    - csi
+    - encryption
+    maintainers:
+    - name: AssasinNik
+    name: kubebao
+    sources:
+    - https://github.com/AssasinNik/kubebao
+    type: application
+    urls:
+    - https://AssasinNik.github.io/kubebao/kubebao-0.1.0-dev.485f890.tgz
+    version: 0.1.0-dev.485f890
+generated: "2026-03-21T14:34:57.714686718Z"
