@@ -44,7 +44,7 @@ kms:
   replicaCount: 1
   
   image:
-    repository: kubebao/kubebao-kms
+    repository: kubebao-kms
     # tag: "" # Defaults to appVersion
   
   # Socket path for KMS plugin
@@ -118,7 +118,7 @@ csi:
   name: kubebao-csi
   
   image:
-    repository: kubebao/kubebao-csi
+    repository: kubebao-csi
     # tag: "" # Defaults to appVersion
   
   # Socket path for CSI provider
@@ -183,7 +183,7 @@ operator:
   replicaCount: 1
   
   image:
-    repository: kubebao/kubebao-operator
+    repository: kubebao-operator
     # tag: "" # Defaults to appVersion
   
   # Leader election settings
@@ -241,7 +241,7 @@ ui:
   replicaCount: 1
 
   image:
-    repository: kubebao/kubebao-ui
+    repository: kubebao-ui
 
   # Service configuration
   service:
