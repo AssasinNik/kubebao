@@ -134,14 +134,15 @@ func (h *APIHandler) Status(w http.ResponseWriter, r *http.Request) {
 		client := &http.Client{Timeout: 3 * time.Second}
 		resp, err := client.Get(h.cfg.OpenBaoAddr + "/v1/sys/health")
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 || resp.StatusCode == 429 {
+			_ = resp.Body.Close()
+			switch resp.StatusCode {
+			case 200, 429:
 				baoHealth = "healthy"
-			} else if resp.StatusCode == 501 {
+			case 501:
 				baoHealth = "not-initialized"
-			} else if resp.StatusCode == 503 {
+			case 503:
 				baoHealth = "sealed"
-			} else {
+			default:
 				baoHealth = fmt.Sprintf("status:%d", resp.StatusCode)
 			}
 		} else {
@@ -182,7 +183,7 @@ func (h *APIHandler) Keys(w http.ResponseWriter, r *http.Request) {
 			req.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
 			resp, err := client.Do(req)
 			if err == nil {
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				var result map[string]interface{}
 				if json.NewDecoder(resp.Body).Decode(&result) == nil {
 					if data, ok := result["data"].(map[string]interface{}); ok {
@@ -247,7 +248,7 @@ func (h *APIHandler) RotateKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, rotateResponse{Success: false, Message: err.Error()})
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		h.keyRotations.Add(1)

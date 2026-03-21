@@ -55,7 +55,7 @@ func (r *BaoPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Обработка удаления — снятие finalizer
-	if !baoPolicy.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !baoPolicy.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, baoPolicy)
 	}
 

@@ -282,7 +282,7 @@ func (p *Provider) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Set socket permissions (allow CSI driver to connect)
 	if err := os.Chmod(p.config.SocketPath, 0660); err != nil {

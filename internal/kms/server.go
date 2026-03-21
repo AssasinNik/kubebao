@@ -233,7 +233,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	if err := os.Chmod(s.config.SocketPath, 0600); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)

@@ -66,7 +66,7 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	log.V(1).Info("BaoSecret загружен", "generation", baoSecret.Generation, "secretPath", baoSecret.Spec.SecretPath)
 
 	// Обработка удаления — удаление finalizer после очистки
-	if !baoSecret.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !baoSecret.DeletionTimestamp.IsZero() {
 		log.Info("Обработка удаления BaoSecret")
 		return r.handleDeletion(ctx, baoSecret)
 	}
