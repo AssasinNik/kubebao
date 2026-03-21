@@ -74,7 +74,9 @@ func (s *Server) Run(ctx context.Context) error {
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func logMiddleware(logger hclog.Logger, next http.Handler) http.Handler {

@@ -4,7 +4,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 REGISTRY ?= ghcr.io
 IMAGE_PREFIX ?= kubebao
-GO_VERSION ?= 1.23
+GO_VERSION ?= 1.26
 PLATFORMS ?= linux/amd64,linux/arm64
 
 # Go settings
