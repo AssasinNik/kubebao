@@ -13,15 +13,16 @@
 3. [Развёртывание OpenBao](#3-развёртывание-openbao)
 4. [Настройка OpenBao](#4-настройка-openbao)
 5. [Сборка и установка KubeBao](#5-сборка-и-установка-kubebao)
-6. [Настройка KMS-шифрования etcd](#6-настройка-kms-шифрования-etcd)
-7. [Создание тестовых секретов и проверка](#7-создание-тестовых-секретов-и-проверка)
-8. [Тестирование BaoSecret (Operator)](#8-тестирование-baosecret-operator)
-9. [Тестирование CSI Provider](#9-тестирование-csi-provider)
-10. [Проверка шифрования etcd](#10-проверка-шифрования-etcd)
-11. [Ротация ключей](#11-ротация-ключей)
-12. [Production Checklist](#12-production-checklist)
-13. [Устранение неполадок](#13-устранение-неполадок)
-14. [Очистка окружения](#14-очистка-окружения)
+6. [Настройка и доступ к KubeBao UI](#6-настройка-и-доступ-к-kubebao-ui)
+7. [Настройка KMS-шифрования etcd](#7-настройка-kms-шифрования-etcd)
+8. [Создание тестовых секретов и проверка](#8-создание-тестовых-секретов-и-проверка)
+9. [Тестирование BaoSecret (Operator)](#9-тестирование-baosecret-operator)
+10. [Тестирование CSI Provider](#10-тестирование-csi-provider)
+11. [Проверка шифрования etcd](#11-проверка-шифрования-etcd)
+12. [Ротация ключей](#12-ротация-ключей)
+13. [Production Checklist](#13-production-checklist)
+14. [Устранение неполадок](#14-устранение-неполадок)
+15. [Очистка окружения](#15-очистка-окружения)
 
 ---
 
@@ -36,7 +37,7 @@
 | Helm | 3.12+ | Установка чартов |
 | kubectl | 1.25+ | Управление кластером |
 | Docker | 20.10+ | Сборка образов (для dev) |
-| Go | 1.23+ | Сборка из исходников (опционально) |
+| Go | 1.26+ | Сборка из исходников (опционально) |
 
 ### 1.2 Ресурсы кластера
 
@@ -45,6 +46,7 @@
 | kubebao-kms | 100m / 200m | 128Mi / 256Mi | Каждый control-plane узел |
 | kubebao-csi | 50m / 100m | 64Mi / 128Mi | Каждый узел |
 | kubebao-operator | 100m / 200m | 128Mi / 256Mi | Любой узел |
+| kubebao-ui | 50m / 100m | 64Mi / 128Mi | Любой узел |
 | OpenBao | 250m / 500m | 256Mi / 512Mi | Отдельный namespace |
 
 ### 1.3 Установка инструментов (macOS)
@@ -206,28 +208,99 @@ kubectl wait --for=condition=ready pod -l app=openbao -n openbao --timeout=180s
 kubectl get pods -n openbao
 ```
 
-### Вариант Б: Production (HA-режим)
+### Вариант Б: Standalone через Helm (Rancher Desktop / k3s / single-node)
+
+> По умолчанию Helm chart OpenBao использует `storage "consul"`, но Consul чаще всего не установлен. Также `storage "file"` несовместим с `service_registration "kubernetes"`. Поэтому задаём конфиг явно.
 
 ```bash
 helm repo add openbao https://openbao.github.io/openbao-helm
 helm repo update
 
 helm install openbao openbao/openbao \
+  -n openbao --create-namespace \
+  --set server.standalone.enabled=true \
+  --set server.dataStorage.enabled=true \
+  --set server.dataStorage.size=1Gi \
+  --set 'server.standalone.config=ui = true
+listener "tcp" {
+  tls_disable = 1
+  address = "[::]:8200"
+  cluster_address = "[::]:8201"
+}
+storage "file" {
+  path = "/openbao/data"
+}' \
+  --set injector.enabled=true
+```
+
+Дождитесь запуска пода (он будет `0/1 Running` — это нормально, ещё не инициализирован):
+
+```bash
+kubectl get pods -n openbao -w
+# Ожидайте: openbao-0   0/1   Running   0   ...
+```
+
+Инициализация (1 ключ для dev/тестирования, 5 ключей для production):
+
+```bash
+# Для тестирования (1 ключ):
+kubectl exec -n openbao openbao-0 -- bao operator init \
+  -key-shares=1 -key-threshold=1 -format=json > openbao-init.json
+
+cat openbao-init.json | jq -r '.unseal_keys_b64[0]'   # Unseal Key
+cat openbao-init.json | jq -r '.root_token'             # Root Token
+```
+
+Разблокировка (unseal):
+
+```bash
+UNSEAL_KEY=$(cat openbao-init.json | jq -r '.unseal_keys_b64[0]')
+kubectl exec -n openbao openbao-0 -- bao operator unseal "$UNSEAL_KEY"
+```
+
+Проверка — под должен стать `1/1 Running`:
+
+```bash
+kubectl get pods -n openbao
+# NAME        READY   STATUS    RESTARTS   AGE
+# openbao-0   1/1     Running   0          2m
+```
+
+> **Сохраните `openbao-init.json` в безопасном месте! Без unseal-ключей вы потеряете доступ к данным.**
+
+### Вариант В: Production HA (Raft, 3 реплики)
+
+```bash
+helm install openbao openbao/openbao \
   --namespace openbao --create-namespace \
   --set server.ha.enabled=true \
-  --set server.ha.replicas=3
+  --set server.ha.replicas=3 \
+  --set server.ha.raft.enabled=true \
+  --set server.dataStorage.enabled=true \
+  --set server.dataStorage.size=10Gi
 
-# Инициализация (выполнить один раз)
+# Инициализация (на первом поде)
 kubectl exec -n openbao openbao-0 -- bao operator init \
-  -key-shares=5 -key-threshold=3
+  -key-shares=5 -key-threshold=3 -format=json > openbao-init.json
 
-# Разблокировка (повторить для каждого пода)
-kubectl exec -n openbao openbao-0 -- bao operator unseal <unseal-key-1>
-kubectl exec -n openbao openbao-0 -- bao operator unseal <unseal-key-2>
-kubectl exec -n openbao openbao-0 -- bao operator unseal <unseal-key-3>
+# Разблокировка каждого пода (3 ключа из 5)
+for pod in openbao-0 openbao-1 openbao-2; do
+  for i in 0 1 2; do
+    KEY=$(cat openbao-init.json | jq -r ".unseal_keys_b64[$i]")
+    kubectl exec -n openbao $pod -- bao operator unseal "$KEY"
+  done
+done
 ```
 
 > **Сохраните unseal-ключи и root-токен в безопасном месте!**
+
+### Типичные ошибки при развёртывании OpenBao
+
+| Ошибка в логах | Причина | Решение |
+|---|---|---|
+| `unknown storage type consul` | Helm chart по умолчанию использует Consul | Задайте `server.standalone.config` с `storage "file"` |
+| `storage does not support HA` | `service_registration "kubernetes"` несовместим с `file` storage | Уберите `service_registration` из конфига |
+| `0/1 Running` после установки | OpenBao не инициализирован/не распечатан | Выполните `bao operator init` + `bao operator unseal` |
 
 ---
 
@@ -427,6 +500,7 @@ cd kubebao
 docker build -t kubebao/kubebao-kms:dev --build-arg COMPONENT=kubebao-kms .
 docker build -t kubebao/kubebao-csi:dev --build-arg COMPONENT=kubebao-csi .
 docker build -t kubebao/kubebao-operator:dev --build-arg COMPONENT=kubebao-operator .
+docker build -t kubebao/kubebao-ui:dev --build-arg COMPONENT=kubebao-ui .
 ```
 
 Проверка:
@@ -434,7 +508,7 @@ docker build -t kubebao/kubebao-operator:dev --build-arg COMPONENT=kubebao-opera
 docker images | grep kubebao
 ```
 
-> Должны отобразиться 3 образа (~25-40 МБ каждый).
+> Должны отобразиться 4 образа (~25-40 МБ каждый).
 
 ### 5.3 Установка Secrets Store CSI Driver
 
@@ -464,6 +538,7 @@ helm upgrade --install kubebao ./charts/kubebao \
   --set kms.image.repository=kubebao/kubebao-kms \
   --set csi.image.repository=kubebao/kubebao-csi \
   --set operator.image.repository=kubebao/kubebao-operator \
+  --set ui.image.repository=kubebao/kubebao-ui \
   --set csi.driver.install=false \
   --wait --timeout=300s
 ```
@@ -502,7 +577,124 @@ kubectl logs -n kubebao-system -l app=kubebao-kms --tail=10
 
 ---
 
-## 6. Настройка KMS-шифрования etcd
+## 6. Настройка и доступ к KubeBao UI
+
+KubeBao UI — веб-панель управления в стиле HashiCorp Vault. Позволяет:
+- просматривать статус системы (OpenBao, KMS, Kubernetes);
+- управлять ключами шифрования (просмотр, ротация);
+- просматривать Kubernetes Secrets (зашифрованные данные);
+- дешифровать секреты своим мастер-ключом;
+- видеть поды с подключённым CSI;
+- отслеживать метрики (операции шифрования, память, горутины).
+
+### 6.1 UI включён по умолчанию
+
+UI включается автоматически при установке KubeBao через Helm (`ui.enabled: true` в `values.yaml`). Проверьте, что pod работает:
+
+```bash
+kubectl get pods -n kubebao-system -l app.kubernetes.io/component=ui
+# NAME                          READY   STATUS    RESTARTS   AGE
+# kubebao-ui-7d8f9c6b4-x2k4l   1/1     Running   0          5m
+```
+
+### 6.2 Доступ через port-forward (быстрый способ)
+
+```bash
+kubectl port-forward svc/kubebao-ui 8443:8443 -n kubebao-system
+```
+
+Откройте в браузере: **http://localhost:8443**
+
+### 6.3 Доступ через Ingress
+
+По умолчанию Helm chart создаёт Ingress-ресурс. Для настройки отредактируйте `values.yaml`:
+
+```yaml
+ui:
+  enabled: true
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: kubebao.local
+        paths:
+          - path: /
+            pathType: Prefix
+    # TLS (опционально)
+    tls:
+      - secretName: kubebao-ui-tls
+        hosts:
+          - kubebao.local
+```
+
+Или задайте через `--set` при установке:
+
+```bash
+helm upgrade --install kubebao ./charts/kubebao \
+  --namespace kubebao-system \
+  --set ui.ingress.enabled=true \
+  --set ui.ingress.className=nginx \
+  --set "ui.ingress.hosts[0].host=kubebao.example.com" \
+  --set "ui.ingress.hosts[0].paths[0].path=/" \
+  --set "ui.ingress.hosts[0].paths[0].pathType=Prefix"
+```
+
+Для локальной разработки добавьте в `/etc/hosts`:
+
+```bash
+echo "127.0.0.1 kubebao.local" | sudo tee -a /etc/hosts
+```
+
+Проверьте Ingress:
+
+```bash
+kubectl get ingress -n kubebao-system
+# NAME          CLASS   HOSTS           ADDRESS        PORTS   AGE
+# kubebao-ui    nginx   kubebao.local   192.168.5.15   80      5m
+```
+
+### 6.4 Настройка OpenBao-токена для UI (ротация ключей)
+
+Для функции ротации ключей через UI нужен OpenBao-токен. Задайте его через переменную окружения:
+
+```bash
+helm upgrade kubebao ./charts/kubebao \
+  --namespace kubebao-system \
+  --reuse-values \
+  --set "extraEnv[0].name=OPENBAO_TOKEN" \
+  --set "extraEnv[0].value=<ваш-root-или-сервисный-токен>"
+```
+
+> **Для production:** создайте сервисный токен с минимальными правами вместо root-токена.
+
+### 6.5 Обзор страниц UI
+
+**Dashboard** — общая информация: статус OpenBao, uptime, KMS-провайдер, метрики.
+
+**Keys** — текущий ключ шифрования (имя, путь в OpenBao KV, версия, алгоритм). Кнопка **Rotate Key** генерирует новый 256-битный ключ и записывает в OpenBao. KMS подхватит новый ключ в течение 30 секунд.
+
+**Secrets** — список Kubernetes Secrets в кластере. Показывает имя, namespace, тип, ключи данных и preview зашифрованного значения. Поддерживает фильтрацию по имени.
+
+**CSI Pods** — поды с подключённым Secrets Store CSI Driver. Показывает SecretProviderClass и mount path.
+
+**Metrics** — операции шифрования/дешифрования, средняя задержка, ротации ключей, горутины, heap allocation.
+
+**Decrypt** — вставьте 256-битный мастер-ключ (base64) и зашифрованный текст (hex или base64). UI расшифрует значение через Kuznyechik AEAD (ГОСТ Р 34.12/13-2015). Это позволяет проверить, что секрет действительно зашифрован и расшифровывается только правильным ключом.
+
+### 6.6 Отключение UI
+
+Если UI не нужен:
+
+```bash
+helm upgrade kubebao ./charts/kubebao \
+  --namespace kubebao-system \
+  --reuse-values \
+  --set ui.enabled=false
+```
+
+---
+
+## 7. Настройка KMS-шифрования etcd
 
 > Этот шаг нужен если вы хотите, чтобы **все Kubernetes Secrets хранились в etcd в зашифрованном виде** алгоритмом Кузнечик.
 
@@ -575,7 +767,7 @@ kubectl get secrets --all-namespaces -o json | kubectl replace -f -
 
 ---
 
-## 7. Создание тестовых секретов и проверка
+## 8. Создание тестовых секретов и проверка
 
 ### 7.1 Создание Kubernetes Secret обычным способом
 
@@ -600,7 +792,7 @@ echo
 kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
 ```
 
-Если KMS настроен (раздел 6), в логах будут строки:
+Если KMS настроен (раздел 7), в логах будут строки:
 ```
 Запрос шифрования uid=... plaintextSize=...
 Шифрование выполнено успешно uid=... ciphertextSize=...
@@ -608,7 +800,7 @@ kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
 
 ---
 
-## 8. Тестирование BaoSecret (Operator)
+## 9. Тестирование BaoSecret (Operator)
 
 ### 8.1 Применение примера BaoSecret
 
@@ -666,7 +858,7 @@ echo
 
 ---
 
-## 9. Тестирование CSI Provider
+## 10. Тестирование CSI Provider
 
 ### 9.1 Применение SecretProviderClass
 
@@ -734,9 +926,9 @@ echo
 
 ---
 
-## 10. Проверка шифрования etcd
+## 11. Проверка шифрования etcd
 
-> Этот раздел актуален только если вы выполнили раздел 6 (настройка KMS).
+> Этот раздел актуален только если вы выполнили раздел 7 (настройка KMS).
 
 ### 10.1 Проверка через API
 
@@ -772,7 +964,7 @@ kubectl logs -n kubebao-system -l app=kubebao-kms --tail=50
 
 ---
 
-## 11. Ротация ключей
+## 12. Ротация ключей
 
 ### 11.1 Ротация ключа шифрования Кузнечик
 
@@ -806,7 +998,7 @@ helm upgrade kubebao kubebao/kubebao \
 
 ---
 
-## 12. Production Checklist
+## 13. Production Checklist
 
 ### Безопасность
 
@@ -824,6 +1016,13 @@ helm upgrade kubebao kubebao/kubebao \
 - [ ] Провайдер шифрования: **kuznyechik** (ГОСТ Р 34.12-2015)
 - [ ] Ротация ключей задокументирована и протестирована
 
+### UI
+
+- [ ] UI доступен через **Ingress с TLS** (не port-forward)
+- [ ] **Не используется root-токен** OpenBao в переменных окружения UI
+- [ ] Network Policy ограничивает доступ к UI (только авторизованные пользователи)
+- [ ] Функция Decrypt доступна только администраторам
+
 ### Инфраструктура
 
 - [ ] Resource limits и requests заданы для всех компонентов
@@ -834,7 +1033,7 @@ helm upgrade kubebao kubebao/kubebao \
 
 ---
 
-## 13. Устранение неполадок
+## 14. Устранение неполадок
 
 ### KMS не запускается
 
@@ -876,6 +1075,26 @@ kubectl get secretproviderclass <name> -o yaml
 - Неверный `roleName` — проверьте роль в OpenBao
 - ServiceAccount не привязан к роли
 
+### UI не открывается
+
+```bash
+# Проверьте, что pod UI работает
+kubectl get pods -n kubebao-system -l app.kubernetes.io/component=ui
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=ui
+
+# Проверьте Service
+kubectl get svc kubebao-ui -n kubebao-system
+
+# Проверьте Ingress
+kubectl get ingress kubebao-ui -n kubebao-system
+kubectl describe ingress kubebao-ui -n kubebao-system
+```
+
+Частые причины:
+- Ingress Controller не установлен — `kubectl get pods -n ingress-nginx`
+- Неверный `ingressClassName` — проверьте `kubectl get ingressclass`
+- Для port-forward: порт уже занят — используйте другой: `kubectl port-forward svc/kubebao-ui 9090:8443 -n kubebao-system`
+
 ### Общая диагностика
 
 ```bash
@@ -890,11 +1109,12 @@ kubectl get secretproviderclasses -A
 kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
 kubectl logs -n kubebao-system -l app=kubebao-csi --tail=20
 kubectl logs -n kubebao-system -l app.kubernetes.io/name=kubebao-operator --tail=20
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=ui --tail=20
 ```
 
 ---
 
-## 14. Очистка окружения
+## 15. Очистка окружения
 
 ```bash
 # Удаление тестовых ресурсов
