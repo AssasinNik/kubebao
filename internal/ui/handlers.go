@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,106 +31,96 @@ type APIHandler struct {
 	startTime time.Time
 	k8s       kubernetes.Interface
 
-	encryptOps  atomic.Int64
-	decryptOps  atomic.Int64
+	encryptOps   atomic.Int64
+	decryptOps   atomic.Int64
 	keyRotations atomic.Int64
+
+	mu          sync.RWMutex
+	opsHistory  []opsPoint
+	keyCreated  time.Time
+	lastRotated time.Time
+}
+
+type opsPoint struct {
+	T    time.Time `json:"t"`
+	Enc  int64     `json:"enc"`
+	Dec  int64     `json:"dec"`
+	Heap float64   `json:"heap"`
+	Gor  int       `json:"gor"`
 }
 
 // NewAPIHandler creates a new API handler.
 func NewAPIHandler(cfg *Config, logger hclog.Logger) (*APIHandler, error) {
-	h := &APIHandler{cfg: cfg, logger: logger, startTime: time.Now()}
+	h := &APIHandler{
+		cfg:        cfg,
+		logger:     logger,
+		startTime:  time.Now(),
+		keyCreated: time.Now(),
+	}
 
 	k8sCfg, err := rest.InClusterConfig()
 	if err != nil {
 		logger.Warn("Not running in-cluster, Kubernetes API features will use demo data", "error", err)
 	} else {
-		client, err := kubernetes.NewForConfig(k8sCfg)
-		if err != nil {
-			logger.Warn("Failed to create Kubernetes client", "error", err)
+		client, err2 := kubernetes.NewForConfig(k8sCfg)
+		if err2 != nil {
+			logger.Warn("Failed to create Kubernetes client", "error", err2)
 		} else {
 			h.k8s = client
 		}
 	}
 
+	go h.collectMetricsLoop()
+
 	return h, nil
 }
 
-// ---------- DTOs ----------
-
-type statusResponse struct {
-	Status        string `json:"status"`
-	Uptime        string `json:"uptime"`
-	Version       string `json:"version"`
-	GoVersion     string `json:"goVersion"`
-	KMSProvider   string `json:"kmsProvider"`
-	KeyName       string `json:"keyName"`
-	OpenBaoAddr   string `json:"openbaoAddr"`
-	OpenBaoHealth string `json:"openbaoHealth"`
-	K8sConnected  bool   `json:"k8sConnected"`
+func (h *APIHandler) collectMetricsLoop() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		h.mu.Lock()
+		h.opsHistory = append(h.opsHistory, opsPoint{
+			T:    time.Now(),
+			Enc:  h.encryptOps.Load(),
+			Dec:  h.decryptOps.Load(),
+			Heap: float64(m.HeapAlloc) / 1024 / 1024,
+			Gor:  runtime.NumGoroutine(),
+		})
+		if len(h.opsHistory) > 240 {
+			h.opsHistory = h.opsHistory[len(h.opsHistory)-240:]
+		}
+		h.mu.Unlock()
+	}
 }
 
-type keyInfoResponse struct {
-	KeyName   string `json:"keyName"`
-	KeyPath   string `json:"keyPath"`
-	Version   int    `json:"version"`
-	Algorithm string `json:"algorithm"`
-	BlockSize int    `json:"blockSize"`
-	KeySize   int    `json:"keySize"`
-	CreatedAt string `json:"createdAt,omitempty"`
+// ---------- Login ----------
+
+// Login validates the provided token against the server-configured token.
+func (h *APIHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Token == "" || req.Token != h.cfg.OpenBaoToken {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "invalid token"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
 
-type rotateResponse struct {
-	Success    bool   `json:"success"`
-	NewVersion int    `json:"newVersion"`
-	Message    string `json:"message"`
-}
+// ---------- Status (public) ----------
 
-type secretEntry struct {
-	Name          string   `json:"name"`
-	Namespace     string   `json:"namespace"`
-	Type          string   `json:"type"`
-	DataKeys      []string `json:"dataKeys"`
-	CipherPreview string   `json:"cipherPreview"`
-	CreatedAt     string   `json:"createdAt"`
-}
-
-type decryptRequest struct {
-	KeyBase64  string `json:"keyBase64"`
-	Ciphertext string `json:"ciphertext"`
-}
-
-type decryptResponse struct {
-	Success   bool   `json:"success"`
-	Plaintext string `json:"plaintext"`
-	Error     string `json:"error,omitempty"`
-}
-
-type csiPodEntry struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Node      string `json:"node"`
-	Status    string `json:"status"`
-	Provider  string `json:"providerClass"`
-	MountPath string `json:"mountPath"`
-}
-
-type metricsResponse struct {
-	EncryptOps     int64   `json:"encryptOps"`
-	DecryptOps     int64   `json:"decryptOps"`
-	AvgEncryptMs   float64 `json:"avgEncryptMs"`
-	AvgDecryptMs   float64 `json:"avgDecryptMs"`
-	KeyRotations   int64   `json:"keyRotations"`
-	CachedKeys     int     `json:"cachedKeys"`
-	GoroutineCount int     `json:"goroutineCount"`
-	HeapAllocMB    float64 `json:"heapAllocMB"`
-	TotalSecrets   int     `json:"totalSecrets"`
-	TotalCSIPods   int     `json:"totalCSIPods"`
-}
-
-// ---------- Handlers ----------
-
-// Status returns overall system status.
-func (h *APIHandler) Status(w http.ResponseWriter, r *http.Request) {
+func (h *APIHandler) Status(w http.ResponseWriter, _ *http.Request) {
 	baoHealth := "unknown"
 	if h.cfg.OpenBaoAddr != "" {
 		client := &http.Client{Timeout: 3 * time.Second}
@@ -150,30 +142,34 @@ func (h *APIHandler) Status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, statusResponse{
-		Status:        "running",
-		Uptime:        time.Since(h.startTime).Round(time.Second).String(),
-		Version:       "0.1.0",
-		GoVersion:     runtime.Version(),
-		KMSProvider:   "kuznyechik (GOST R 34.12-2015)",
-		KeyName:       h.cfg.KMSKeyName,
-		OpenBaoAddr:   h.cfg.OpenBaoAddr,
-		OpenBaoHealth: baoHealth,
-		K8sConnected:  h.k8s != nil,
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":        "running",
+		"uptime":        time.Since(h.startTime).Round(time.Second).String(),
+		"version":       "0.1.0",
+		"goVersion":     runtime.Version(),
+		"kmsProvider":   "Kuznyechik (GOST R 34.12-2015)",
+		"keyName":       h.cfg.KMSKeyName,
+		"openbaoAddr":   h.cfg.OpenBaoAddr,
+		"openbaoHealth": baoHealth,
+		"k8sConnected":  h.k8s != nil,
 	})
 }
 
-// Keys returns current key information.
-func (h *APIHandler) Keys(w http.ResponseWriter, r *http.Request) {
+// ---------- Keys ----------
+
+func (h *APIHandler) Keys(w http.ResponseWriter, _ *http.Request) {
 	keyPath := fmt.Sprintf("secret/data/%s/%s", h.cfg.KVPathPrefix, h.cfg.KMSKeyName)
 
-	info := keyInfoResponse{
-		KeyName:   h.cfg.KMSKeyName,
-		KeyPath:   keyPath,
-		Version:   1,
-		Algorithm: "Kuznyechik (GOST R 34.12-2015) + CTR/CMAC (GOST R 34.13-2015)",
-		BlockSize: 128,
-		KeySize:   256,
+	info := map[string]interface{}{
+		"keyName":   h.cfg.KMSKeyName,
+		"keyPath":   keyPath,
+		"version":   1,
+		"algorithm": "Kuznyechik (GOST R 34.12-2015) + CTR/CMAC (GOST R 34.13-2015)",
+		"blockSize": 128,
+		"keySize":   256,
+		"createdAt": h.keyCreated.Format(time.RFC3339),
+		"mode":      "AEAD: CTR encryption + CMAC authentication",
+		"standard":  "GOST R 34.12-2015, GOST R 34.13-2015",
 	}
 
 	if h.cfg.OpenBaoToken != "" && h.cfg.OpenBaoAddr != "" {
@@ -189,12 +185,15 @@ func (h *APIHandler) Keys(w http.ResponseWriter, r *http.Request) {
 					if data, ok := result["data"].(map[string]interface{}); ok {
 						if inner, ok := data["data"].(map[string]interface{}); ok {
 							if v, ok := inner["version"].(float64); ok {
-								info.Version = int(v)
+								info["version"] = int(v)
 							}
 						}
 						if meta, ok := data["metadata"].(map[string]interface{}); ok {
 							if ct, ok := meta["created_time"].(string); ok {
-								info.CreatedAt = ct
+								info["createdAt"] = ct
+							}
+							if v, ok := meta["version"].(float64); ok {
+								info["kvVersion"] = int(v)
 							}
 						}
 					}
@@ -203,7 +202,69 @@ func (h *APIHandler) Keys(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.mu.RLock()
+	if !h.lastRotated.IsZero() {
+		info["lastRotated"] = h.lastRotated.Format(time.RFC3339)
+	}
+	info["totalRotations"] = h.keyRotations.Load()
+	h.mu.RUnlock()
+
 	writeJSON(w, http.StatusOK, info)
+}
+
+// KeyValue returns the actual encryption key value from OpenBao (admin only).
+func (h *APIHandler) KeyValue(w http.ResponseWriter, _ *http.Request) {
+	if h.cfg.OpenBaoToken == "" || h.cfg.OpenBaoAddr == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "OpenBao not configured"})
+		return
+	}
+
+	keyPath := fmt.Sprintf("secret/data/%s/%s", h.cfg.KVPathPrefix, h.cfg.KMSKeyName)
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", h.cfg.OpenBaoAddr+"/v1/"+keyPath, nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	req.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "parse error"})
+		return
+	}
+
+	keyValue := ""
+	version := 0
+	createdAt := ""
+
+	if data, ok := result["data"].(map[string]interface{}); ok {
+		if inner, ok := data["data"].(map[string]interface{}); ok {
+			if k, ok := inner["key"].(string); ok {
+				keyValue = k
+			}
+			if v, ok := inner["version"].(float64); ok {
+				version = int(v)
+			}
+		}
+		if meta, ok := data["metadata"].(map[string]interface{}); ok {
+			if ct, ok := meta["created_time"].(string); ok {
+				createdAt = ct
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"key":       keyValue,
+		"version":   version,
+		"createdAt": createdAt,
+	})
 }
 
 // RotateKey generates a new 256-bit key and writes it to OpenBao KV.
@@ -214,16 +275,16 @@ func (h *APIHandler) RotateKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.cfg.OpenBaoToken == "" {
-		writeJSON(w, http.StatusForbidden, rotateResponse{
-			Success: false,
-			Message: "OpenBao token not configured",
+		writeJSON(w, http.StatusForbidden, map[string]interface{}{
+			"success": false,
+			"message": "OpenBao token not configured",
 		})
 		return
 	}
 
 	newKey := make([]byte, 32)
 	if _, err := rand.Read(newKey); err != nil {
-		writeJSON(w, http.StatusInternalServerError, rotateResponse{Success: false, Message: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "message": err.Error()})
 		return
 	}
 
@@ -237,7 +298,7 @@ func (h *APIHandler) RotateKey(w http.ResponseWriter, r *http.Request) {
 	req, err := http.NewRequest("POST", h.cfg.OpenBaoAddr+"/v1/secret/data/"+keyPath,
 		strings.NewReader(body))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, rotateResponse{Success: false, Message: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "message": err.Error()})
 		return
 	}
 	req.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
@@ -245,75 +306,129 @@ func (h *APIHandler) RotateKey(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, rotateResponse{Success: false, Message: err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]interface{}{"success": false, "message": err.Error()})
 		return
 	}
 	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		h.keyRotations.Add(1)
+		h.mu.Lock()
+		h.lastRotated = time.Now()
+		h.mu.Unlock()
 		h.logger.Info("Key rotated", "newVersion", newVersion)
-		writeJSON(w, http.StatusOK, rotateResponse{
-			Success:    true,
-			NewVersion: newVersion,
-			Message:    "Key rotated. KMS picks up the new key within 30s.",
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"newVersion": newVersion,
+			"message":    "Key rotated. KMS picks up the new key within 30s.",
 		})
 	} else {
-		writeJSON(w, http.StatusBadGateway, rotateResponse{
-			Success: false,
-			Message: fmt.Sprintf("OpenBao returned status %d", resp.StatusCode),
+		writeJSON(w, http.StatusBadGateway, map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("OpenBao returned status %d", resp.StatusCode),
 		})
 	}
 }
 
-// Secrets lists Kubernetes secrets from the cluster (or demo data out-of-cluster).
+// ---------- Secrets ----------
+
 func (h *APIHandler) Secrets(w http.ResponseWriter, r *http.Request) {
 	if h.k8s != nil {
 		ns := r.URL.Query().Get("namespace")
-		if ns == "" {
-			ns = ""
-		}
-		secrets, err := h.k8s.CoreV1().Secrets(ns).List(context.Background(), metav1.ListOptions{
-			Limit: 100,
-		})
+		secrets, err := h.k8s.CoreV1().Secrets(ns).List(context.Background(), metav1.ListOptions{Limit: 200})
 		if err != nil {
 			h.logger.Error("Failed to list secrets", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 
-		entries := make([]secretEntry, 0, len(secrets.Items))
+		entries := make([]map[string]interface{}, 0, len(secrets.Items))
 		for _, s := range secrets.Items {
 			if s.Type == corev1.SecretTypeServiceAccountToken || strings.HasPrefix(s.Name, "sh.helm") {
 				continue
 			}
 			keys := make([]string, 0, len(s.Data))
-			for k := range s.Data {
+			totalSize := 0
+			for k, v := range s.Data {
 				keys = append(keys, k)
+				totalSize += len(v)
 			}
+			sort.Strings(keys)
 			preview := ""
 			for _, v := range s.Data {
 				raw := base64.StdEncoding.EncodeToString(v)
-				if len(raw) > 24 {
-					raw = raw[:24] + "..."
+				if len(raw) > 32 {
+					raw = raw[:32] + "..."
 				}
 				preview = raw
 				break
 			}
-			entries = append(entries, secretEntry{
-				Name:          s.Name,
-				Namespace:     s.Namespace,
-				Type:          string(s.Type),
-				DataKeys:      keys,
-				CipherPreview: preview,
-				CreatedAt:     s.CreationTimestamp.Format(time.RFC3339),
+			labels := map[string]string{}
+			for k, v := range s.Labels {
+				labels[k] = v
+			}
+			annotations := map[string]string{}
+			for k, v := range s.Annotations {
+				if !strings.HasPrefix(k, "kubectl.kubernetes.io") {
+					annotations[k] = v
+				}
+			}
+			entries = append(entries, map[string]interface{}{
+				"name":          s.Name,
+				"namespace":     s.Namespace,
+				"type":          string(s.Type),
+				"dataKeys":      keys,
+				"cipherPreview": preview,
+				"createdAt":     s.CreationTimestamp.Format(time.RFC3339),
+				"labels":        labels,
+				"annotations":   annotations,
+				"size":          totalSize,
+				"uid":           string(s.UID),
+				"version":       s.ResourceVersion,
 			})
 		}
 		writeJSON(w, http.StatusOK, entries)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, demoSecrets())
+}
+
+// SecretDetail returns full detail for one secret.
+func (h *APIHandler) SecretDetail(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/secrets/"), "/")
+	if len(parts) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected /api/secrets/{namespace}/{name}"})
+		return
+	}
+	ns, name := parts[0], parts[1]
+
+	if h.k8s == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"name": name, "namespace": ns, "data": map[string]string{}})
+		return
+	}
+
+	secret, err := h.k8s.CoreV1().Secrets(ns).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	dataMap := map[string]string{}
+	for k, v := range secret.Data {
+		dataMap[k] = base64.StdEncoding.EncodeToString(v)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":            secret.Name,
+		"namespace":       secret.Namespace,
+		"type":            string(secret.Type),
+		"data":            dataMap,
+		"labels":          secret.Labels,
+		"annotations":     secret.Annotations,
+		"createdAt":       secret.CreationTimestamp.Format(time.RFC3339),
+		"uid":             string(secret.UID),
+		"resourceVersion": secret.ResourceVersion,
+	})
 }
 
 // DecryptSecret attempts to decrypt ciphertext with a user-provided key.
@@ -323,15 +438,18 @@ func (h *APIHandler) DecryptSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req decryptRequest
+	var req struct {
+		KeyBase64  string `json:"keyBase64"`
+		Ciphertext string `json:"ciphertext"`
+	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, decryptResponse{Success: false, Error: "invalid JSON"})
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid JSON"})
 		return
 	}
 
 	key, err := base64.StdEncoding.DecodeString(req.KeyBase64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, decryptResponse{Success: false, Error: "invalid base64 key"})
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid base64 key"})
 		return
 	}
 
@@ -339,40 +457,38 @@ func (h *APIHandler) DecryptSecret(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ct, err = base64.StdEncoding.DecodeString(req.Ciphertext)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, decryptResponse{Success: false, Error: "invalid ciphertext encoding (hex or base64)"})
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid ciphertext (hex or base64)"})
 			return
 		}
 	}
 
 	aead, err := crypto.NewKuznyechikAEAD(key)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, decryptResponse{Success: false, Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
 
 	h.decryptOps.Add(1)
 	plaintext, err := aead.Decrypt(ct)
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, decryptResponse{Success: false, Error: "decryption failed: invalid key or corrupted ciphertext"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{"success": false, "error": "decryption failed: invalid key or corrupted ciphertext"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, decryptResponse{Success: true, Plaintext: string(plaintext)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "plaintext": string(plaintext)})
 }
 
-// CSIPods lists pods that have SecretProviderClass volumes.
-func (h *APIHandler) CSIPods(w http.ResponseWriter, r *http.Request) {
+// ---------- CSI ----------
+
+func (h *APIHandler) CSIPods(w http.ResponseWriter, _ *http.Request) {
 	if h.k8s != nil {
-		pods, err := h.k8s.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-			Limit: 200,
-		})
+		pods, err := h.k8s.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{Limit: 500})
 		if err != nil {
-			h.logger.Error("Failed to list pods", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 
-		var entries []csiPodEntry
+		var entries []map[string]interface{}
 		for _, p := range pods.Items {
 			for _, vol := range p.Spec.Volumes {
 				if vol.CSI != nil && vol.CSI.Driver == "secrets-store.csi.k8s.io" {
@@ -389,13 +505,24 @@ func (h *APIHandler) CSIPods(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
-					entries = append(entries, csiPodEntry{
-						Name:      p.Name,
-						Namespace: p.Namespace,
-						Node:      p.Spec.NodeName,
-						Status:    string(p.Status.Phase),
-						Provider:  providerClass,
-						MountPath: mountPath,
+
+					ready := 0
+					total := len(p.Status.ContainerStatuses)
+					for _, cs := range p.Status.ContainerStatuses {
+						if cs.Ready {
+							ready++
+						}
+					}
+
+					entries = append(entries, map[string]interface{}{
+						"name":          p.Name,
+						"namespace":     p.Namespace,
+						"node":          p.Spec.NodeName,
+						"status":        string(p.Status.Phase),
+						"providerClass": providerClass,
+						"mountPath":     mountPath,
+						"ready":         fmt.Sprintf("%d/%d", ready, total),
+						"age":           time.Since(p.CreationTimestamp.Time).Round(time.Second).String(),
 					})
 				}
 			}
@@ -403,17 +530,200 @@ func (h *APIHandler) CSIPods(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, entries)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, demoCSIPods())
 }
 
-// Metrics returns system and operational metrics.
-func (h *APIHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+// CSIClasses lists SecretProviderClasses.
+func (h *APIHandler) CSIClasses(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, []map[string]string{
+		{"name": "kubebao-secrets", "provider": "kubebao", "namespace": "default"},
+	})
+}
+
+// ---------- OpenBao ----------
+
+func (h *APIHandler) OpenBaoInfo(w http.ResponseWriter, _ *http.Request) {
+	info := map[string]interface{}{
+		"address": h.cfg.OpenBaoAddr,
+		"health":  "unknown",
+	}
+
+	if h.cfg.OpenBaoAddr == "" {
+		writeJSON(w, http.StatusOK, info)
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Health
+	resp, err := client.Get(h.cfg.OpenBaoAddr + "/v1/sys/health")
+	if err != nil {
+		info["health"] = "unreachable"
+		info["error"] = err.Error()
+		writeJSON(w, http.StatusOK, info)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var healthData map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&healthData) == nil {
+		info["health"] = healthData
+		if init, ok := healthData["initialized"].(bool); ok {
+			info["initialized"] = init
+		}
+		if sealed, ok := healthData["sealed"].(bool); ok {
+			info["sealed"] = sealed
+		}
+		if v, ok := healthData["version"].(string); ok {
+			info["version"] = v
+		}
+		if cn, ok := healthData["cluster_name"].(string); ok {
+			info["clusterName"] = cn
+		}
+	}
+
+	// Seal status
+	if h.cfg.OpenBaoToken != "" {
+		sealReq, _ := http.NewRequest("GET", h.cfg.OpenBaoAddr+"/v1/sys/seal-status", nil)
+		sealReq.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
+		sealResp, err := client.Do(sealReq)
+		if err == nil {
+			defer func() { _ = sealResp.Body.Close() }()
+			var sealData map[string]interface{}
+			if json.NewDecoder(sealResp.Body).Decode(&sealData) == nil {
+				info["sealStatus"] = sealData
+			}
+		}
+
+		// Mounts
+		mountsReq, _ := http.NewRequest("GET", h.cfg.OpenBaoAddr+"/v1/sys/mounts", nil)
+		mountsReq.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
+		mountsResp, err := client.Do(mountsReq)
+		if err == nil {
+			defer func() { _ = mountsResp.Body.Close() }()
+			var mountsData map[string]interface{}
+			if json.NewDecoder(mountsResp.Body).Decode(&mountsData) == nil {
+				mounts := []map[string]string{}
+				for path, v := range mountsData {
+					if m, ok := v.(map[string]interface{}); ok {
+						mType, _ := m["type"].(string)
+						desc, _ := m["description"].(string)
+						mounts = append(mounts, map[string]string{
+							"path":        path,
+							"type":        mType,
+							"description": desc,
+						})
+					}
+				}
+				info["mounts"] = mounts
+			}
+		}
+
+		// Auth methods
+		authReq, _ := http.NewRequest("GET", h.cfg.OpenBaoAddr+"/v1/sys/auth", nil)
+		authReq.Header.Set("X-Vault-Token", h.cfg.OpenBaoToken)
+		authResp, err := client.Do(authReq)
+		if err == nil {
+			defer func() { _ = authResp.Body.Close() }()
+			var authData map[string]interface{}
+			if json.NewDecoder(authResp.Body).Decode(&authData) == nil {
+				methods := []map[string]string{}
+				for path, v := range authData {
+					if m, ok := v.(map[string]interface{}); ok {
+						mType, _ := m["type"].(string)
+						methods = append(methods, map[string]string{
+							"path": path,
+							"type": mType,
+						})
+					}
+				}
+				info["authMethods"] = methods
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+// ---------- Cluster ----------
+
+func (h *APIHandler) ClusterInfo(w http.ResponseWriter, _ *http.Request) {
+	info := map[string]interface{}{
+		"connected": h.k8s != nil,
+	}
+	if h.k8s == nil {
+		writeJSON(w, http.StatusOK, info)
+		return
+	}
+
+	nodes, err := h.k8s.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err == nil {
+		nodeList := make([]map[string]interface{}, 0, len(nodes.Items))
+		for _, n := range nodes.Items {
+			status := "NotReady"
+			for _, c := range n.Status.Conditions {
+				if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
+					status = "Ready"
+				}
+			}
+			nodeList = append(nodeList, map[string]interface{}{
+				"name":            n.Name,
+				"status":          status,
+				"kubeletVersion":  n.Status.NodeInfo.KubeletVersion,
+				"os":              n.Status.NodeInfo.OSImage,
+				"arch":            n.Status.NodeInfo.Architecture,
+				"containerRuntime": n.Status.NodeInfo.ContainerRuntimeVersion,
+			})
+		}
+		info["nodes"] = nodeList
+	}
+
+	nsList, err := h.k8s.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	if err == nil {
+		info["namespaceCount"] = len(nsList.Items)
+	}
+
+	podList, err := h.k8s.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{Limit: 1})
+	if err == nil {
+		total := len(podList.Items)
+		if podList.RemainingItemCount != nil {
+			total += int(*podList.RemainingItemCount)
+		}
+		info["totalPods"] = total
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+// Namespaces returns a list of namespace names.
+func (h *APIHandler) Namespaces(w http.ResponseWriter, _ *http.Request) {
+	if h.k8s == nil {
+		writeJSON(w, http.StatusOK, []string{"default", "kube-system", "kubebao-system"})
+		return
+	}
+	nsList, err := h.k8s.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	names := make([]string, 0, len(nsList.Items))
+	for _, ns := range nsList.Items {
+		names = append(names, ns.Name)
+	}
+	writeJSON(w, http.StatusOK, names)
+}
+
+// ---------- Metrics ----------
+
+func (h *APIHandler) Metrics(w http.ResponseWriter, _ *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
 	totalSecrets := 0
 	totalCSIPods := 0
+	totalPods := 0
+	namespacesCount := 0
+
 	if h.k8s != nil {
 		if sl, err := h.k8s.CoreV1().Secrets("").List(context.Background(), metav1.ListOptions{Limit: 1}); err == nil {
 			if sl.RemainingItemCount != nil {
@@ -422,58 +732,80 @@ func (h *APIHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 				totalSecrets = len(sl.Items)
 			}
 		}
+		if pl, err := h.k8s.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{Limit: 1}); err == nil {
+			if pl.RemainingItemCount != nil {
+				totalPods = int(*pl.RemainingItemCount) + len(pl.Items)
+			} else {
+				totalPods = len(pl.Items)
+			}
+		}
+		if ns, err := h.k8s.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{}); err == nil {
+			namespacesCount = len(ns.Items)
+		}
 	}
 
-	writeJSON(w, http.StatusOK, metricsResponse{
-		EncryptOps:     h.encryptOps.Load(),
-		DecryptOps:     h.decryptOps.Load(),
-		AvgEncryptMs:   0.18,
-		AvgDecryptMs:   0.16,
-		KeyRotations:   h.keyRotations.Load(),
-		CachedKeys:     1,
-		GoroutineCount: runtime.NumGoroutine(),
-		HeapAllocMB:    float64(m.HeapAlloc) / 1024 / 1024,
-		TotalSecrets:   totalSecrets,
-		TotalCSIPods:   totalCSIPods,
+	h.mu.RLock()
+	history := make([]opsPoint, len(h.opsHistory))
+	copy(history, h.opsHistory)
+	h.mu.RUnlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"encryptOps":      h.encryptOps.Load(),
+		"decryptOps":      h.decryptOps.Load(),
+		"avgEncryptMs":    0.18,
+		"avgDecryptMs":    0.16,
+		"keyRotations":    h.keyRotations.Load(),
+		"cachedKeys":      1,
+		"goroutineCount":  runtime.NumGoroutine(),
+		"heapAllocMB":     float64(m.HeapAlloc) / 1024 / 1024,
+		"stackAllocMB":    float64(m.StackInuse) / 1024 / 1024,
+		"sysMB":           float64(m.Sys) / 1024 / 1024,
+		"numGC":           m.NumGC,
+		"gcPauseMs":       float64(m.PauseTotalNs) / 1e6,
+		"totalAllocs":     m.TotalAlloc / 1024 / 1024,
+		"liveObjects":     m.Mallocs - m.Frees,
+		"totalSecrets":    totalSecrets,
+		"totalCSIPods":    totalCSIPods,
+		"totalPods":       totalPods,
+		"namespaces":      namespacesCount,
+		"uptimeSeconds":   int(time.Since(h.startTime).Seconds()),
+		"cpuCount":        runtime.NumCPU(),
+		"history":         history,
 	})
 }
 
-// ---------- Demo data (out-of-cluster) ----------
+// ---------- Demo data ----------
 
-func demoSecrets() []secretEntry {
-	return []secretEntry{
+func demoSecrets() []map[string]interface{} {
+	return []map[string]interface{}{
 		{
-			Name: "my-app-secret", Namespace: "default", Type: "Opaque",
-			DataKeys:      []string{"api_key", "environment", "debug"},
-			CipherPreview: "AQEAAABRa3V6bmVjaGlr...",
-			CreatedAt:     time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+			"name": "my-app-secret", "namespace": "default", "type": "Opaque",
+			"dataKeys":      []string{"api_key", "environment", "debug"},
+			"cipherPreview": "AQEAAABRa3V6bmVjaGlr...",
+			"createdAt":     time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+			"labels":        map[string]string{"app": "demo"},
+			"annotations":   map[string]string{},
+			"size":          128,
 		},
 		{
-			Name: "database-creds", Namespace: "default", Type: "Opaque",
-			DataKeys:      []string{"username", "password", "host", "port"},
-			CipherPreview: "AQEAAAB7ZW5jcnlwdGVk...",
-			CreatedAt:     time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-		},
-		{
-			Name: "tls-cert", Namespace: "ingress-nginx", Type: "kubernetes.io/tls",
-			DataKeys:      []string{"tls.crt", "tls.key"},
-			CipherPreview: "AQEAAABjZXJ0aWZpY2F0...",
-			CreatedAt:     time.Now().Add(-72 * time.Hour).Format(time.RFC3339),
+			"name": "database-creds", "namespace": "default", "type": "Opaque",
+			"dataKeys":      []string{"username", "password", "host", "port"},
+			"cipherPreview": "AQEAAAB7ZW5jcnlwdGVk...",
+			"createdAt":     time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
+			"labels":        map[string]string{"tier": "backend"},
+			"annotations":   map[string]string{},
+			"size":          256,
 		},
 	}
 }
 
-func demoCSIPods() []csiPodEntry {
-	return []csiPodEntry{
+func demoCSIPods() []map[string]interface{} {
+	return []map[string]interface{}{
 		{
-			Name: "demo-app-7d4f8b6c9-x2k4l", Namespace: "default",
-			Node: "worker-1", Status: "Running",
-			Provider: "kubebao-secrets", MountPath: "/mnt/secrets",
-		},
-		{
-			Name: "api-gateway-5f9d8c7b4-m3n2p", Namespace: "default",
-			Node: "worker-2", Status: "Running",
-			Provider: "kubebao-secrets", MountPath: "/var/run/secrets/app",
+			"name": "demo-app-7d4f8b6c9-x2k4l", "namespace": "default",
+			"node": "worker-1", "status": "Running",
+			"providerClass": "kubebao-secrets", "mountPath": "/mnt/secrets",
+			"ready": "1/1", "age": "2h30m",
 		},
 	}
 }

@@ -243,6 +243,13 @@ ui:
   image:
     repository: kubebao-ui
 
+  # Extra environment variables for UI container
+  # Example: set OPENBAO_TOKEN for authentication
+  # env:
+  #   - name: OPENBAO_TOKEN
+  #     value: "root"
+  env: []
+
   # Service configuration
   service:
     type: ClusterIP

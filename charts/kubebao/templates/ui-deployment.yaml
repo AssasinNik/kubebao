@@ -40,6 +40,9 @@ spec:
             - name: KUBEBAO_KMS_KV_PREFIX
               value: {{ .Values.kms.kuznyechik.kvPathPrefix | quote }}
             {{- end }}
+            {{- with .Values.ui.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

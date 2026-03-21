@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -34,14 +35,23 @@ func NewServer(cfg *Config, logger hclog.Logger) (*Server, error) {
 func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 
-	// API routes
+	// Public endpoints (no auth)
+	mux.HandleFunc("/api/auth/login", s.api.Login)
 	mux.HandleFunc("/api/status", s.api.Status)
-	mux.HandleFunc("/api/keys", s.api.Keys)
-	mux.HandleFunc("/api/keys/rotate", s.api.RotateKey)
-	mux.HandleFunc("/api/secrets", s.api.Secrets)
-	mux.HandleFunc("/api/secrets/decrypt", s.api.DecryptSecret)
-	mux.HandleFunc("/api/csi/pods", s.api.CSIPods)
-	mux.HandleFunc("/api/metrics", s.api.Metrics)
+
+	// Protected API routes
+	mux.Handle("/api/keys", s.authMiddleware(http.HandlerFunc(s.api.Keys)))
+	mux.Handle("/api/keys/rotate", s.authMiddleware(http.HandlerFunc(s.api.RotateKey)))
+	mux.Handle("/api/keys/current", s.authMiddleware(http.HandlerFunc(s.api.KeyValue)))
+	mux.Handle("/api/secrets", s.authMiddleware(http.HandlerFunc(s.api.Secrets)))
+	mux.Handle("/api/secrets/", s.authMiddleware(http.HandlerFunc(s.api.SecretDetail)))
+	mux.Handle("/api/secrets/decrypt", s.authMiddleware(http.HandlerFunc(s.api.DecryptSecret)))
+	mux.Handle("/api/csi/pods", s.authMiddleware(http.HandlerFunc(s.api.CSIPods)))
+	mux.Handle("/api/csi/classes", s.authMiddleware(http.HandlerFunc(s.api.CSIClasses)))
+	mux.Handle("/api/metrics", s.authMiddleware(http.HandlerFunc(s.api.Metrics)))
+	mux.Handle("/api/openbao", s.authMiddleware(http.HandlerFunc(s.api.OpenBaoInfo)))
+	mux.Handle("/api/cluster", s.authMiddleware(http.HandlerFunc(s.api.ClusterInfo)))
+	mux.Handle("/api/namespaces", s.authMiddleware(http.HandlerFunc(s.api.Namespaces)))
 
 	// Static frontend
 	sub, err := fs.Sub(staticFiles, "static")
@@ -71,6 +81,23 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+// authMiddleware checks the X-Token header matches the configured OpenBao token.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("X-Token")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" || token != s.cfg.OpenBaoToken {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -83,6 +110,9 @@ func logMiddleware(logger hclog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			return
+		}
 		logger.Debug("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
 	})
 }
@@ -90,8 +120,8 @@ func logMiddleware(logger hclog.Logger, next http.Handler) http.Handler {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

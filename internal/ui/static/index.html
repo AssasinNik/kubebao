@@ -1,130 +1,93 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KubeBao</title>
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2280%22>&#127919;</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2280%22>&#128274;</text></svg>">
 </head>
 <body>
-<div class="layout">
+
+<!-- LOGIN -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 40 40" fill="none" width="48" height="48"><rect x="3" y="3" width="34" height="34" rx="8" stroke="var(--accent)" stroke-width="2.5"/><path d="M14 20h12M20 14v12" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
+      <h1>KubeBao</h1>
+      <p class="login-sub">Kubernetes Secret Management</p>
+    </div>
+    <div class="login-form">
+      <label for="login-token">OpenBao Token</label>
+      <div class="login-input-wrap">
+        <input type="password" id="login-token" placeholder="hvs.xxxxx..." autocomplete="off">
+        <button class="btn-icon" id="login-toggle-vis" title="Toggle">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
+        </button>
+      </div>
+      <button class="btn btn-primary login-btn" id="login-submit">Sign In</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+    <div class="login-footer">
+      <span id="login-bao-status" class="login-status">Checking OpenBao...</span>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="layout" style="display:none">
   <nav class="sidebar">
     <div class="sidebar-logo">
-      <svg class="logo-svg" viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="6" stroke="currentColor" stroke-width="2.5"/><path d="M10 16h12M16 10v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 32 32" fill="none" width="26" height="26"><rect x="2" y="2" width="28" height="28" rx="6" stroke="var(--accent)" stroke-width="2.5"/><path d="M10 16h12M16 10v12" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
       <div class="logo-info">
         <span class="logo-text">KubeBao</span>
         <span class="logo-version">v0.1.0</span>
       </div>
     </div>
     <ul class="nav-list">
-      <li class="nav-item active" data-page="dashboard">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
-        <span>Dashboard</span>
-      </li>
-      <li class="nav-item" data-page="keys">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"/></svg>
-        <span>Keys</span>
-      </li>
-      <li class="nav-item" data-page="secrets">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-        <span>Secrets</span>
-      </li>
-      <li class="nav-item" data-page="csi">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M13 7H7v6h6V7z"/><path fill-rule="evenodd" d="M7 2a1 1 0 012 0v1h2V2a1 1 0 112 0v1h2a2 2 0 012 2v2h1a1 1 0 110 2h-1v2h1a1 1 0 110 2h-1v2a2 2 0 01-2 2h-2v1a1 1 0 11-2 0v-1H9v1a1 1 0 11-2 0v-1H5a2 2 0 01-2-2v-2H2a1 1 0 110-2h1V9H2a1 1 0 010-2h1V5a2 2 0 012-2h2V2zM5 5h10v10H5V5z" clip-rule="evenodd"/></svg>
-        <span>CSI Pods</span>
-      </li>
-      <li class="nav-item" data-page="metrics">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
-        <span>Metrics</span>
-      </li>
-      <li class="nav-item" data-page="decrypt">
-        <svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a1 1 0 00-1 1v1a1 1 0 002 0V3a1 1 0 00-1-1zM4 4h3a3 3 0 006 0h3a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zm2.5 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm2.45 4a2.5 2.5 0 10-4.9 0h4.9zM12 9a1 1 0 100 2h3a1 1 0 100-2h-3zm-1 4a1 1 0 011-1h3a1 1 0 110 2h-3a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
-        <span>Decrypt</span>
-      </li>
+      <li class="nav-item active" data-page="dashboard"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg><span>Overview</span></li>
+      <li class="nav-item" data-page="keys"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"/></svg><span>Keys</span></li>
+      <li class="nav-item" data-page="secrets"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg><span>Secrets</span></li>
+      <li class="nav-item" data-page="openbao"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg><span>OpenBao</span></li>
+      <li class="nav-item" data-page="csi"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M13 7H7v6h6V7z"/><path fill-rule="evenodd" d="M7 2a1 1 0 012 0v1h2V2a1 1 0 112 0v1h2a2 2 0 012 2v2h1a1 1 0 110 2h-1v2h1a1 1 0 110 2h-1v2a2 2 0 01-2 2h-2v1a1 1 0 11-2 0v-1H9v1a1 1 0 11-2 0v-1H5a2 2 0 01-2-2v-2H2a1 1 0 110-2h1V9H2a1 1 0 010-2h1V5a2 2 0 012-2h2V2zM5 5h10v10H5V5z" clip-rule="evenodd"/></svg><span>CSI Pods</span></li>
+      <li class="nav-item" data-page="metrics"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg><span>Metrics</span></li>
+      <li class="nav-item" data-page="decrypt"><svg class="nav-svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 2a1 1 0 00-1 1v1a1 1 0 002 0V3a1 1 0 00-1-1zM4 4h3a3 3 0 006 0h3a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zm2.5 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm2.45 4a2.5 2.5 0 10-4.9 0h4.9zM12 9a1 1 0 100 2h3a1 1 0 100-2h-3zm-1 4a1 1 0 011-1h3a1 1 0 110 2h-3a1 1 0 01-1-1z" clip-rule="evenodd"/></svg><span>Decrypt</span></li>
     </ul>
     <div class="sidebar-footer">
-      <div class="status-indicator" id="baoStatus">
-        <span class="dot"></span>
-        <span class="label">OpenBao</span>
-      </div>
-      <div class="status-indicator" id="k8sStatus" style="margin-top:0.4rem">
-        <span class="dot"></span>
-        <span class="label">Kubernetes</span>
-      </div>
+      <div class="status-indicator" id="baoStatus"><span class="dot"></span><span class="label">OpenBao</span></div>
+      <div class="status-indicator" id="k8sStatus" style="margin-top:6px"><span class="dot"></span><span class="label">Kubernetes</span></div>
+      <button class="btn-logout" id="btn-logout">Sign Out</button>
     </div>
   </nav>
 
   <main class="content">
-    <!-- DASHBOARD -->
+    <!-- OVERVIEW -->
     <section id="page-dashboard" class="page active">
-      <div class="page-header">
-        <h1>Dashboard</h1>
-        <span class="badge" id="d-status-badge">Running</span>
-      </div>
-      <div class="cards-row">
-        <div class="stat-card accent">
-          <div class="stat-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-          </div>
-          <div class="stat-body">
-            <div class="stat-label">KMS Provider</div>
-            <div class="stat-value" id="d-provider">--</div>
-          </div>
+      <div class="page-header"><h1>Overview</h1><span class="badge" id="d-status-badge">Operational</span></div>
+      <div class="cards-grid-3">
+        <div class="info-card">
+          <div class="info-card-head"><div class="ic-dot green"></div>KMS Provider</div>
+          <div class="info-card-val" id="d-provider">--</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
-          </div>
-          <div class="stat-body">
-            <div class="stat-label">Uptime</div>
-            <div class="stat-value" id="d-uptime">--</div>
-          </div>
+        <div class="info-card">
+          <div class="info-card-head"><div class="ic-dot blue"></div>Active Key</div>
+          <div class="info-card-val" id="d-keyname">--</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"/></svg>
-          </div>
-          <div class="stat-body">
-            <div class="stat-label">Active Key</div>
-            <div class="stat-value" id="d-keyname">--</div>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
-          </div>
-          <div class="stat-body">
-            <div class="stat-label">OpenBao</div>
-            <div class="stat-value" id="d-bao">--</div>
-          </div>
+        <div class="info-card">
+          <div class="info-card-head"><div class="ic-dot"></div>OpenBao</div>
+          <div class="info-card-val" id="d-bao">--</div>
         </div>
       </div>
-      <div class="cards-row" style="margin-top:1rem">
-        <div class="stat-card mini">
-          <div class="stat-label">Encrypt Ops</div>
-          <div class="stat-value mono" id="d-enc">0</div>
-        </div>
-        <div class="stat-card mini">
-          <div class="stat-label">Decrypt Ops</div>
-          <div class="stat-value mono" id="d-dec">0</div>
-        </div>
-        <div class="stat-card mini">
-          <div class="stat-label">Goroutines</div>
-          <div class="stat-value mono" id="d-goroutines">0</div>
-        </div>
-        <div class="stat-card mini">
-          <div class="stat-label">Heap (MB)</div>
-          <div class="stat-value mono" id="d-heap">0</div>
-        </div>
-        <div class="stat-card mini">
-          <div class="stat-label">Secrets</div>
-          <div class="stat-value mono" id="d-secrets">0</div>
-        </div>
-        <div class="stat-card mini">
-          <div class="stat-label">Go Version</div>
-          <div class="stat-value mono" id="d-goversion">--</div>
-        </div>
+      <div class="cards-grid-5" style="margin-top:16px">
+        <div class="metric-card"><span class="mc-label">Uptime</span><span class="mc-val" id="d-uptime">--</span></div>
+        <div class="metric-card"><span class="mc-label">Encrypt Ops</span><span class="mc-val mono" id="d-enc">0</span></div>
+        <div class="metric-card"><span class="mc-label">Decrypt Ops</span><span class="mc-val mono" id="d-dec">0</span></div>
+        <div class="metric-card"><span class="mc-label">Secrets</span><span class="mc-val mono" id="d-secrets">0</span></div>
+        <div class="metric-card"><span class="mc-label">Go</span><span class="mc-val mono" id="d-goversion">--</span></div>
+      </div>
+      <div class="chart-area" style="margin-top:20px">
+        <h3>Resource Usage (last hour)</h3>
+        <canvas id="chart-heap" height="140"></canvas>
       </div>
     </section>
 
@@ -132,64 +95,94 @@
     <section id="page-keys" class="page">
       <div class="page-header">
         <h1>Encryption Keys</h1>
-        <button class="btn btn-danger" id="btn-rotate">
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
-          Rotate Key
-        </button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline" id="btn-show-key">Show Key</button>
+          <button class="btn btn-danger" id="btn-rotate">Rotate Key</button>
+        </div>
       </div>
-      <div class="rotate-msg" id="rotate-msg"></div>
+      <div class="alert" id="rotate-msg" style="display:none"></div>
       <div class="detail-grid">
         <div class="detail-card">
-          <div class="detail-icon key-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd"/></svg>
-          </div>
           <h3>Key Details</h3>
           <table class="kv-table">
             <tr><td>Name</td><td id="k-name">--</td></tr>
             <tr><td>Path</td><td id="k-path" class="mono">--</td></tr>
             <tr><td>Version</td><td id="k-version">--</td></tr>
             <tr><td>Created</td><td id="k-created">--</td></tr>
+            <tr><td>Last Rotated</td><td id="k-rotated">--</td></tr>
+            <tr><td>Total Rotations</td><td id="k-rotations">--</td></tr>
           </table>
         </div>
         <div class="detail-card">
-          <div class="detail-icon algo-icon">
-            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-          </div>
           <h3>Algorithm</h3>
           <table class="kv-table">
             <tr><td>Cipher</td><td id="k-algo">--</td></tr>
             <tr><td>Block Size</td><td id="k-block">--</td></tr>
             <tr><td>Key Size</td><td id="k-size">--</td></tr>
-            <tr><td>Standard</td><td>GOST R 34.12/13-2015</td></tr>
+            <tr><td>Mode</td><td id="k-mode">--</td></tr>
+            <tr><td>Standard</td><td id="k-standard">--</td></tr>
           </table>
         </div>
+      </div>
+      <div class="detail-card" id="key-value-panel" style="margin-top:16px;display:none">
+        <h3>Current Key Value <span class="text-muted">(sensitive)</span></h3>
+        <div class="key-display mono" id="key-value-display">--</div>
+        <p class="text-muted" style="margin-top:8px;font-size:12px">This key is stored in OpenBao KV. Keep it secret.</p>
       </div>
     </section>
 
     <!-- SECRETS -->
     <section id="page-secrets" class="page">
       <div class="page-header">
-        <h1>Secrets</h1>
+        <h1>Kubernetes Secrets</h1>
         <div class="filter-bar">
-          <input type="text" id="secrets-filter" placeholder="Filter by name..." class="input-filter">
+          <select id="ns-filter" class="input-select"><option value="">All Namespaces</option></select>
+          <input type="text" id="secrets-filter" placeholder="Search..." class="input-filter">
         </div>
       </div>
+      <p class="page-subtitle">Secrets stored in etcd. When KMS is enabled, values are encrypted with Kuznyechik (GOST R 34.12-2015). kubectl shows decrypted values; etcd stores ciphertext.</p>
       <div class="table-wrap">
         <table class="data-table" id="secrets-table">
-          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>Data Keys</th><th>Encrypted Preview</th><th>Created</th></tr></thead>
+          <thead><tr><th>Name</th><th>Namespace</th><th>Type</th><th>Keys</th><th>Size</th><th>Age</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
+      <!-- Secret Detail Modal -->
+      <div class="modal-overlay" id="secret-modal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-header"><h2 id="modal-secret-title">Secret</h2><button class="btn-icon modal-close" id="modal-close">&times;</button></div>
+          <div id="modal-secret-body"></div>
+        </div>
+      </div>
     </section>
 
-    <!-- CSI PODS -->
-    <section id="page-csi" class="page">
-      <div class="page-header">
-        <h1>CSI Connected Pods</h1>
+    <!-- OPENBAO -->
+    <section id="page-openbao" class="page">
+      <div class="page-header"><h1>OpenBao</h1></div>
+      <div class="cards-grid-3" id="bao-cards"></div>
+      <div class="detail-grid" style="margin-top:16px">
+        <div class="detail-card">
+          <h3>Secret Engines (Mounts)</h3>
+          <div id="bao-mounts">Loading...</div>
+        </div>
+        <div class="detail-card">
+          <h3>Auth Methods</h3>
+          <div id="bao-auth">Loading...</div>
+        </div>
       </div>
+      <div class="detail-card" style="margin-top:16px">
+        <h3>Seal Status</h3>
+        <div id="bao-seal">Loading...</div>
+      </div>
+    </section>
+
+    <!-- CSI -->
+    <section id="page-csi" class="page">
+      <div class="page-header"><h1>CSI Connected Pods</h1></div>
+      <p class="page-subtitle">Pods using Secrets Store CSI Driver to mount secrets from OpenBao into the filesystem.</p>
       <div class="table-wrap">
         <table class="data-table" id="csi-table">
-          <thead><tr><th>Pod</th><th>Namespace</th><th>Node</th><th>Status</th><th>SecretProviderClass</th><th>Mount Path</th></tr></thead>
+          <thead><tr><th>Pod</th><th>Namespace</th><th>Node</th><th>Status</th><th>Ready</th><th>SecretProviderClass</th><th>Mount Path</th><th>Age</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -197,54 +190,49 @@
 
     <!-- METRICS -->
     <section id="page-metrics" class="page">
-      <div class="page-header">
-        <h1>System Metrics</h1>
+      <div class="page-header"><h1>System Metrics</h1></div>
+      <div class="cards-grid-4" id="metrics-grid"></div>
+      <div class="detail-grid" style="margin-top:16px">
+        <div class="detail-card">
+          <h3>Memory</h3>
+          <table class="kv-table" id="mem-table"></table>
+        </div>
+        <div class="detail-card">
+          <h3>Runtime</h3>
+          <table class="kv-table" id="rt-table"></table>
+        </div>
       </div>
-      <div class="cards-row">
-        <div class="stat-card"><div class="stat-label">Encrypt Ops</div><div class="stat-value mono" id="m-enc">0</div></div>
-        <div class="stat-card"><div class="stat-label">Decrypt Ops</div><div class="stat-value mono" id="m-dec">0</div></div>
-        <div class="stat-card"><div class="stat-label">Avg Encrypt</div><div class="stat-value mono" id="m-enc-ms">0 ms</div></div>
-        <div class="stat-card"><div class="stat-label">Avg Decrypt</div><div class="stat-value mono" id="m-dec-ms">0 ms</div></div>
-      </div>
-      <div class="cards-row" style="margin-top:1rem">
-        <div class="stat-card"><div class="stat-label">Key Rotations</div><div class="stat-value mono" id="m-rot">0</div></div>
-        <div class="stat-card"><div class="stat-label">Cached Keys</div><div class="stat-value mono" id="m-cache">0</div></div>
-        <div class="stat-card"><div class="stat-label">Goroutines</div><div class="stat-value mono" id="m-gor">0</div></div>
-        <div class="stat-card"><div class="stat-label">Heap Alloc</div><div class="stat-value mono" id="m-heap">0 MB</div></div>
+      <div class="chart-area" style="margin-top:16px">
+        <h3>Goroutines &amp; Heap (timeline)</h3>
+        <canvas id="chart-metrics" height="160"></canvas>
       </div>
     </section>
 
     <!-- DECRYPT -->
     <section id="page-decrypt" class="page">
-      <div class="page-header">
-        <h1>Decrypt Secret</h1>
-      </div>
-      <p class="page-subtitle">Paste your 256-bit master key (base64) and ciphertext to decrypt using Kuznyechik AEAD (GOST).</p>
+      <div class="page-header"><h1>Decrypt Secret</h1></div>
+      <p class="page-subtitle">Verify KMS encryption: paste the 256-bit master key and ciphertext from etcd to decrypt using Kuznyechik AEAD.</p>
       <div class="decrypt-panel">
         <div class="decrypt-form">
           <div class="form-group">
             <label>Master Key (base64, 256-bit)</label>
             <div class="input-with-toggle">
-              <input type="password" id="dec-key" placeholder="Paste your base64-encoded 256-bit key" autocomplete="off">
-              <button class="btn-icon" id="toggle-key-vis" title="Toggle visibility">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg>
-              </button>
+              <input type="password" id="dec-key" placeholder="base64-encoded 256-bit key" autocomplete="off">
+              <button class="btn-icon" id="toggle-key-vis"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/></svg></button>
             </div>
           </div>
           <div class="form-group">
             <label>Ciphertext (hex or base64)</label>
-            <textarea id="dec-ct" rows="5" placeholder="Paste encrypted data here..."></textarea>
+            <textarea id="dec-ct" rows="5" placeholder="Paste encrypted data..."></textarea>
           </div>
-          <button class="btn btn-primary" id="btn-decrypt">
-            <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-right:6px"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-            Decrypt
-          </button>
+          <button class="btn btn-primary" id="btn-decrypt">Decrypt</button>
         </div>
         <div class="decrypt-result" id="dec-result"></div>
       </div>
     </section>
   </main>
 </div>
+
 <script src="app.js"></script>
 </body>
 </html>

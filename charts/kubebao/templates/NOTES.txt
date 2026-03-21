@@ -1,0 +1,89 @@
+
+════════════════════════════════════════════════════════════════
+   ╻┏━ ╻ ╻ ┏┓  ┏━╸ ┏┓  ┏━┓ ┏━┓
+   ┣┻┓ ┃ ┃ ┣┻┓ ┣╸  ┣┻┓ ┣━┫ ┃ ┃
+   ╹ ╹ ┗━┛ ┗━┛ ┗━╸ ┗━┛ ╹ ╹ ┗━┛
+   Kubernetes Secret Management with OpenBao
+════════════════════════════════════════════════════════════════
+
+  Version:    {{ .Chart.AppVersion }}
+  Namespace:  {{ .Release.Namespace }}
+  Release:    {{ .Release.Name }}
+
+────────────────────────────────────────────────────────────────
+  QUICK START
+────────────────────────────────────────────────────────────────
+
+  1. Check all pods are running:
+
+     kubectl get pods -n {{ .Release.Namespace }}
+
+  2. View KMS logs (encryption provider):
+
+     kubectl logs -n {{ .Release.Namespace }} -l app=kubebao-kms --tail=20
+
+{{- if .Values.ui.enabled }}
+
+────────────────────────────────────────────────────────────────
+  WEB UI
+────────────────────────────────────────────────────────────────
+
+  KubeBao UI provides a web dashboard for managing encryption
+  keys, viewing secrets, monitoring system metrics, and
+  inspecting OpenBao status.
+
+  ► Access via port-forward:
+
+    kubectl port-forward svc/{{ .Values.ui.name }} {{ .Values.ui.service.port }}:{{ .Values.ui.service.port }} -n {{ .Release.Namespace }}
+
+    Then open: http://localhost:{{ .Values.ui.service.port }}
+
+{{- if .Values.ui.ingress.enabled }}
+{{- range .Values.ui.ingress.hosts }}
+  ► Access via Ingress:
+
+    http://{{ .host }}
+{{- end }}
+{{- end }}
+
+  ► Login with your OpenBao token.
+    For dev: set OPENBAO_TOKEN=root via Helm:
+
+    helm upgrade {{ .Release.Name }} ./charts/kubebao \
+      -n {{ .Release.Namespace }} --reuse-values \
+      --set "ui.env[0].name=OPENBAO_TOKEN" \
+      --set "ui.env[0].value=root"
+
+  UI Pages:
+    • Overview   — system status, heap/goroutine charts
+    • Keys       — view/rotate encryption key, show key value
+    • Secrets    — browse K8s secrets, click for full detail
+    • OpenBao    — seal status, mounts, auth methods
+    • CSI Pods   — pods with mounted CSI secrets
+    • Metrics    — memory, GC, ops counters, timeline graphs
+    • Decrypt    — verify etcd ciphertext with master key
+
+{{- end }}
+
+────────────────────────────────────────────────────────────────
+  ENCRYPTION
+────────────────────────────────────────────────────────────────
+
+  Cipher:     Kuznyechik (GOST R 34.12-2015)
+  Mode:       AEAD — CTR encryption + CMAC authentication
+  Key:        256-bit, stored in OpenBao KV
+  Standard:   GOST R 34.12-2015, GOST R 34.13-2015
+
+  The KMS plugin encrypts Kubernetes Secrets at rest in etcd.
+  kubectl still shows decrypted values (API-server decrypts
+  transparently), but raw etcd data is ciphertext.
+
+────────────────────────────────────────────────────────────────
+  DOCUMENTATION
+────────────────────────────────────────────────────────────────
+
+  Deployment guide:  https://github.com/AssasinNik/kubebao/blob/main/docs/DEPLOYMENT.md
+  Architecture:      https://github.com/AssasinNik/kubebao/blob/main/docs/ARCHITECTURE.tex
+  Source code:       https://github.com/AssasinNik/kubebao
+
+════════════════════════════════════════════════════════════════
