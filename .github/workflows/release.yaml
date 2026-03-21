@@ -39,7 +39,9 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -51,8 +53,8 @@ jobs:
             COMPONENT=${{ matrix.component }}
             VERSION=${{ steps.version.outputs.VERSION }}
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}:${{ steps.version.outputs.VERSION }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}:latest
+            ${{ env.REGISTRY }}/${{ steps.version.outputs.OWNER }}/${{ matrix.component }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ steps.version.outputs.OWNER }}/${{ matrix.component }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -120,7 +122,8 @@ jobs:
           cd gh-pages
           helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           git add .
-          git commit -m "Release ${{ steps.version.outputs.VERSION }}"
+          git commit -m "Release ${{ steps.version.outputs.VERSION }}" || echo "Nothing to commit"
+          git pull --rebase origin gh-pages || true
           git push origin gh-pages
 
       - name: Update gh-pages (new branch)
@@ -187,7 +190,9 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -200,17 +205,17 @@ jobs:
             
             **Helm:**
             ```bash
-            helm repo add kubebao https://${{ github.repository_owner }}.github.io/kubebao
+            helm repo add kubebao https://${{ steps.version.outputs.OWNER }}.github.io/kubebao
             helm repo update
             helm install kubebao kubebao/kubebao --version ${{ steps.version.outputs.VERSION }}
             ```
             
             **Docker Images:**
             ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/kubebao-operator:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/${{ github.repository_owner }}/kubebao-kms:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/${{ github.repository_owner }}/kubebao-csi:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/${{ github.repository_owner }}/kubebao-ui:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/${{ steps.version.outputs.OWNER }}/kubebao-operator:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/${{ steps.version.outputs.OWNER }}/kubebao-kms:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/${{ steps.version.outputs.OWNER }}/kubebao-csi:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/${{ steps.version.outputs.OWNER }}/kubebao-ui:${{ steps.version.outputs.VERSION }}
             ```
             
             ### Changelog
