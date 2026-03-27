@@ -182,9 +182,10 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	keyID := s.keyID
 	s.mu.RUnlock()
 
-	// Create annotations (can be used for additional metadata)
+	// KMS v2: ключи аннотаций должны быть FQDN (k8s validateAnnotations → IsFullyQualifiedDomainName).
+	// Стиль "prefix/name" здесь недопустим — слэш ломает проверку и даёт kms-providers failed.
 	annotations := map[string][]byte{
-		"kubebao.io/key-name": []byte(s.config.KeyName),
+		"kms-key.kubebao.io": []byte(s.config.KeyName),
 	}
 
 	s.logger.Debug("Шифрование выполнено успешно", "uid", req.Uid, "ciphertextSize", len(ciphertext))

@@ -68,6 +68,7 @@ cover.out
 secrets/
 credentials.json
 service-account.json
+openbao-init.json
 
 # Cursor/IDE
 .cursor/
