@@ -8,7 +8,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.2
-    created: "2026-03-27T08:23:50.823996861Z"
+    created: "2026-03-27T08:26:07.129248166Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 0ebedf356a8f6f386637d64854ad8f2b29490d176fecd40319c7c05bc3eb4314
     home: https://github.com/AssasinNik/kubebao
@@ -36,7 +36,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.1
-    created: "2026-03-27T08:23:50.822492578Z"
+    created: "2026-03-27T08:26:07.128424586Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 2867ff47f28d789252e9133c6cf3b3fd2bb0f190baac1760c71c46140e50f890
     home: https://github.com/AssasinNik/kubebao
@@ -64,7 +64,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-03-27T08:23:50.821669326Z"
+    created: "2026-03-27T08:26:07.127556153Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 6ebf43482307f018d164bf3a62896659fb304bab9eff78e70c292d6173c60530
     home: https://github.com/kubebao/kubebao
@@ -93,7 +93,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.f5a4037
-    created: "2026-03-27T08:23:50.821014498Z"
+    created: "2026-03-27T08:26:07.126246414Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: d2fe7eb9b8d1574b538254da47c99a25fc8d3c284d63908fc4ee3434006d04b2
     home: https://github.com/AssasinNik/kubebao
@@ -121,7 +121,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.f3e1eb5
-    created: "2026-03-27T08:23:50.820193451Z"
+    created: "2026-03-27T08:26:07.124280191Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: a559fd2379cf208e5981076f3d3a5ab4b4f0ee36a7ef3b85af0bf838e71ac831
     home: https://github.com/AssasinNik/kubebao
@@ -149,7 +149,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.f24f3dc
-    created: "2026-03-27T08:23:50.819141353Z"
+    created: "2026-03-27T08:26:07.122509782Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 8f3d055acbd8d906af9afa41c0adade7bcc7136efb6c26aedcc51098537bcfc8
     home: https://github.com/AssasinNik/kubebao
@@ -177,7 +177,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.ec72f4d
-    created: "2026-03-27T08:23:50.8182258Z"
+    created: "2026-03-27T08:26:07.120836053Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 54ba08ad31b457505a13892ef289fa0fb21358de9dfe60ae084d88e1a6463c38
     home: https://github.com/AssasinNik/kubebao
@@ -205,7 +205,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.e5e4144
-    created: "2026-03-27T08:23:50.817402939Z"
+    created: "2026-03-27T08:26:07.119207097Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 7cfefb2605ec84edeb79f25627e377b9bd172858678e219eed28e4b6d5feabe7
     home: https://github.com/AssasinNik/kubebao
@@ -232,8 +232,36 @@ entries:
       artifacthub.io/operator: "true"
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
+    appVersion: 0.1.0-dev.e24d446
+    created: "2026-03-27T08:26:07.117637861Z"
+    description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
+    digest: 536cddf1258de1915867596ddebb1b4b6e35ee3177e1698cba3ba3bf2fbccbcc
+    home: https://github.com/AssasinNik/kubebao
+    keywords:
+    - kubernetes
+    - secrets
+    - openbao
+    - vault
+    - kms
+    - csi
+    - encryption
+    maintainers:
+    - name: AssasinNik
+    name: kubebao
+    sources:
+    - https://github.com/AssasinNik/kubebao
+    type: application
+    urls:
+    - https://assasinnik.github.io/kubebao/kubebao-0.1.0-dev.e24d446.tgz
+    version: 0.1.0-dev.e24d446
+  - annotations:
+      artifacthub.io/category: security
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+      artifacthub.io/operatorCapabilities: Full Lifecycle
+    apiVersion: v2
     appVersion: 0.1.0-dev.dac513d
-    created: "2026-03-27T08:23:50.816549371Z"
+    created: "2026-03-27T08:26:07.115970003Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 1c66946303a45d9d66915a2c2087cb2fb305e50572078c33e02ccec04afed7aa
     home: https://github.com/AssasinNik/kubebao
@@ -261,7 +289,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.9a06f88
-    created: "2026-03-27T08:23:50.814626587Z"
+    created: "2026-03-27T08:26:07.114293689Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: cc648333684cb4a8ebb74e59dd9e14606532389580809da1073be0dd52c37c54
     home: https://github.com/AssasinNik/kubebao
@@ -289,7 +317,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.4fd5012
-    created: "2026-03-27T08:23:50.813804587Z"
+    created: "2026-03-27T08:26:07.112713433Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: c7b60a0a22c46416693016adb918c3ecf97440edbcaf94a7e3f1c390c8a1f399
     home: https://github.com/AssasinNik/kubebao
@@ -317,7 +345,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.495da56
-    created: "2026-03-27T08:23:50.812986485Z"
+    created: "2026-03-27T08:26:07.110762324Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: d6acf10dd699c057c5efb53e8adfe9616b6730a9d02f817762e3ac3378f832da
     home: https://github.com/AssasinNik/kubebao
@@ -345,7 +373,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.485f890
-    created: "2026-03-27T08:23:50.812140081Z"
+    created: "2026-03-27T08:26:07.109025281Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 11019300928e9a8726b4f8d21746a0af7e61fc29afe3640e12be880251666f43
     home: https://github.com/AssasinNik/kubebao
@@ -373,7 +401,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.3dbc79d
-    created: "2026-03-27T08:23:50.811361873Z"
+    created: "2026-03-27T08:26:07.107489689Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 036cc1602f1a05fd0844985e24ecc9e4ab1cb33f6191a3ea1ba387cfa763bfad
     home: https://github.com/AssasinNik/kubebao
@@ -401,7 +429,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.12f7326
-    created: "2026-03-27T08:23:50.810513585Z"
+    created: "2026-03-27T08:26:07.105886741Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: db8615c1e4ea04d3bb47abbc2b9f60595228da211368de90c8680b6dbbcec74e
     home: https://github.com/AssasinNik/kubebao
@@ -429,7 +457,7 @@ entries:
       artifacthub.io/operatorCapabilities: Full Lifecycle
     apiVersion: v2
     appVersion: 0.1.0-dev.0e8cb59
-    created: "2026-03-27T08:23:50.809656901Z"
+    created: "2026-03-27T08:26:07.104292569Z"
     description: KubeBao - Unified Kubernetes Secrets Management with OpenBao
     digest: 4b9733cd0192e1887516f0c4cf1cd8738bb985acf5e2cf6211301c3f98fe08e9
     home: https://github.com/AssasinNik/kubebao
@@ -450,4 +478,4 @@ entries:
     urls:
     - https://assasinnik.github.io/kubebao/kubebao-0.1.0-dev.0e8cb59.tgz
     version: 0.1.0-dev.0e8cb59
-generated: "2026-03-27T08:23:50.808567234Z"
+generated: "2026-03-27T08:26:07.102346984Z"
