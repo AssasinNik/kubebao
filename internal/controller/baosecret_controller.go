@@ -26,8 +26,8 @@ import (
 const (
 	// Финализатор для корректного удаления: при удалении BaoSecret сначала вызывается handleDeletion
 	baoSecretFinalizer = "kubebao.io/finalizer"
-	// Интервал по умолчанию между проверками актуальности секрета (1 час)
-	defaultRefreshInterval = time.Hour
+	// Интервал по умолчанию между проверками актуальности секрета (1 минута)
+	defaultRefreshInterval = time.Minute
 )
 
 // BaoSecretReconciler — контроллер, который отслеживает BaoSecret CRD и синхронизирует
@@ -51,7 +51,7 @@ type BaoSecretReconciler struct {
 // связанного Secret. Возвращает ctrl.Result с RequeueAfter для периодической пересинхронизации.
 func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("baosecret", req.NamespacedName)
-	log.V(1).Info("Начало reconcile", "namespace", req.Namespace, "name", req.Name)
+	log.Info("Reconcile начат", "namespace", req.Namespace, "name", req.Name)
 
 	// Загрузка BaoSecret из API-сервера
 	baoSecret := &kubebaoiov1alpha1.BaoSecret{}
@@ -63,7 +63,12 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "Ошибка получения BaoSecret")
 		return ctrl.Result{}, err
 	}
-	log.V(1).Info("BaoSecret загружен", "generation", baoSecret.Generation, "secretPath", baoSecret.Spec.SecretPath)
+	log.Info("BaoSecret загружен",
+		"generation", baoSecret.Generation,
+		"secretPath", baoSecret.Spec.SecretPath,
+		"target", baoSecret.Spec.Target.Name,
+		"refreshInterval", baoSecret.Spec.RefreshInterval,
+	)
 
 	// Обработка удаления — удаление finalizer после очистки
 	if !baoSecret.DeletionTimestamp.IsZero() {
@@ -92,7 +97,11 @@ func (r *BaoSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Синхронизация секрета из OpenBao в Kubernetes Secret
-	log.V(1).Info("Синхронизация секрета", "path", baoSecret.Spec.SecretPath, "target", baoSecret.Spec.Target.Name)
+	log.Info("Синхронизация секрета из OpenBao → Kubernetes",
+		"sourcePath", baoSecret.Spec.SecretPath,
+		"targetSecret", baoSecret.Spec.Target.Name,
+		"targetNamespace", baoSecret.Spec.Target.Namespace,
+	)
 	if err := r.syncSecret(ctx, baoSecret); err != nil {
 		log.Error(err, "Ошибка синхронизации секрета")
 		r.setCondition(baoSecret, kubebaoiov1alpha1.ConditionTypeSynced, metav1.ConditionFalse,
@@ -142,13 +151,13 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 	}
 
 	// Чтение секрета из OpenBao KV v2 (путь вида secret/data/myapp/database)
-	log.V(1).Info("Чтение секрета из OpenBao", "path", baoSecret.Spec.SecretPath)
+	log.Info("Чтение секрета из OpenBao KV", "path", baoSecret.Spec.SecretPath)
 	secretData, err := baoClient.KVRead(ctx, baoSecret.Spec.SecretPath)
 	if err != nil {
 		log.Error(err, "Ошибка чтения секрета из OpenBao", "path", baoSecret.Spec.SecretPath)
 		return fmt.Errorf("failed to read secret from OpenBao: %w", err)
 	}
-	log.V(1).Info("Секрет прочитан", "keysCount", len(secretData))
+	log.Info("Секрет прочитан из OpenBao", "keysCount", len(secretData), "path", baoSecret.Spec.SecretPath)
 
 	// Извлечение конкретного ключа (SecretKey) или всех ключей
 	var data map[string][]byte
@@ -239,7 +248,13 @@ func (r *BaoSecretReconciler) syncSecret(ctx context.Context, baoSecret *kubebao
 		return fmt.Errorf("failed to create/update secret: %w", err)
 	}
 
-	log.Info("Операция с секретом выполнена", "operation", op, "secret", secret.Name, "namespace", secret.Namespace)
+	log.Info("Операция с Kubernetes Secret выполнена",
+		"operation", op,
+		"secret", secret.Name,
+		"namespace", secret.Namespace,
+		"version", version,
+		"keysCount", len(data),
+	)
 
 	// Update status
 	baoSecret.Status.SecretVersion = version

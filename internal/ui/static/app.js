@@ -342,27 +342,183 @@ function infoCard(label, val, dotColor) {
 }
 
 // ===== CSI =====
+let csiSelectedPod = null;
+let csiAttachedSecrets = [];
+
 async function loadCSI() {
   try {
-    const pods = await api('/api/csi/pods');
+    const [pods, csiPods, secrets, ns] = await Promise.all([
+      api('/api/csi/all-pods'),
+      api('/api/csi/pods'),
+      api('/api/secrets'),
+      api('/api/namespaces')
+    ]);
+
+    // Namespace filter
+    const nsSel = $('csi-ns-filter');
+    nsSel.innerHTML = '<option value="">All NS</option>';
+    (ns || []).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; nsSel.appendChild(o); });
+
+    // Pod list
+    renderCSIPodList(pods || []);
+    nsSel.addEventListener('change', () => {
+      const f = nsSel.value;
+      renderCSIPodList(f ? (pods || []).filter(p => p.namespace === f) : (pods || []));
+    });
+
+    // Secret list (draggable)
+    renderCSISecretList(secrets || []);
+
+    // CSI connected table
     const tbody = document.querySelector('#csi-table tbody');
-    if (!pods || !pods.length) {
+    if (!csiPods || !csiPods.length) {
       tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><p>No CSI pods found</p></td></tr>';
-      return;
+    } else {
+      tbody.innerHTML = csiPods.map(p => `
+        <tr>
+          <td class="name-cell">${esc(p.name)}</td>
+          <td>${esc(p.namespace)}</td>
+          <td>${esc(p.node)}</td>
+          <td class="${p.status==='Running'?'status-running':'status-other'}">${esc(p.status)}</td>
+          <td>${esc(p.ready)}</td>
+          <td><span class="data-key">${esc(p.providerClass)}</span></td>
+          <td class="mono">${esc(p.mountPath)}</td>
+          <td>${esc(p.age)}</td>
+        </tr>`).join('');
     }
-    tbody.innerHTML = pods.map(p => `
-      <tr>
-        <td class="name-cell">${esc(p.name)}</td>
-        <td>${esc(p.namespace)}</td>
-        <td>${esc(p.node)}</td>
-        <td class="${p.status==='Running'?'status-running':'status-other'}">${esc(p.status)}</td>
-        <td>${esc(p.ready)}</td>
-        <td><span class="data-key">${esc(p.providerClass)}</span></td>
-        <td class="mono">${esc(p.mountPath)}</td>
-        <td>${esc(p.age)}</td>
-      </tr>`).join('');
   } catch (e) { console.error('CSI error:', e); }
 }
+
+function renderCSIPodList(pods) {
+  const list = $('csi-pod-list');
+  if (!pods.length) { list.innerHTML = '<p class="text-muted" style="padding:12px;font-size:12px">No pods found</p>'; return; }
+  list.innerHTML = pods.map(p => `
+    <div class="pod-item" data-name="${esc(p.name)}" data-ns="${esc(p.namespace)}">
+      <div class="pod-status ${esc(p.status)}"></div>
+      <div class="pod-info">
+        <div class="pod-name" title="${esc(p.name)}">${esc(p.name)}</div>
+        <div class="pod-ns">${esc(p.namespace)} · ${esc(p.ready)} · ${esc(p.age)}</div>
+      </div>
+    </div>`).join('');
+
+  list.querySelectorAll('.pod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      list.querySelectorAll('.pod-item').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      csiSelectedPod = { name: el.dataset.name, namespace: el.dataset.ns };
+      csiAttachedSecrets = [];
+      updateCSIDropZone();
+    });
+  });
+}
+
+function renderCSISecretList(secrets) {
+  const list = $('csi-secret-list');
+  const search = $('csi-secret-search');
+  const render = (filter) => {
+    const filtered = filter ? secrets.filter(s => s.name.toLowerCase().includes(filter) || s.namespace.toLowerCase().includes(filter)) : secrets;
+    list.innerHTML = filtered.map(s => `
+      <div class="secret-drag-item" draggable="true" data-name="${esc(s.name)}" data-ns="${esc(s.namespace)}">
+        <div class="secret-name">${esc(s.name)}</div>
+        <div class="secret-ns">${esc(s.namespace)} · ${(s.dataKeys||[]).length} keys</div>
+      </div>`).join('');
+
+    list.querySelectorAll('.secret-drag-item').forEach(el => {
+      el.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', JSON.stringify({ name: el.dataset.name, namespace: el.dataset.ns }));
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+      el.addEventListener('click', () => {
+        if (!csiSelectedPod) return;
+        addCSISecret(el.dataset.name, el.dataset.ns);
+      });
+    });
+  };
+  render('');
+  search.addEventListener('input', () => render(search.value.toLowerCase()));
+}
+
+function updateCSIDropZone() {
+  const zone = $('csi-selected-pod');
+  const drop = $('csi-drop-target');
+  const config = $('csi-attach-config');
+  const result = $('csi-attach-result');
+
+  if (!csiSelectedPod) {
+    zone.innerHTML = '<p class="text-muted">Select a pod from the left panel</p>';
+    drop.style.display = 'none';
+    config.style.display = 'none';
+    return;
+  }
+
+  zone.innerHTML = `<div style="text-align:left;width:100%"><strong>${esc(csiSelectedPod.name)}</strong><br><span class="text-muted" style="font-size:11px">${esc(csiSelectedPod.namespace)}</span></div>`;
+  drop.style.display = 'block';
+  config.style.display = 'block';
+  result.style.display = 'none';
+  renderAttachedSecrets();
+}
+
+function addCSISecret(name, ns) {
+  if (csiAttachedSecrets.find(s => s.name === name && s.namespace === ns)) return;
+  csiAttachedSecrets.push({ name, namespace: ns });
+  renderAttachedSecrets();
+}
+
+function renderAttachedSecrets() {
+  const el = $('csi-attached-secrets');
+  if (!csiAttachedSecrets.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = csiAttachedSecrets.map((s, i) =>
+    `<span class="attached-chip">${esc(s.name)} <span class="chip-remove" data-idx="${i}">&times;</span></span>`
+  ).join('');
+  el.querySelectorAll('.chip-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      csiAttachedSecrets.splice(parseInt(btn.dataset.idx), 1);
+      renderAttachedSecrets();
+    });
+  });
+}
+
+// Drag & drop on the target area
+(function() {
+  const drop = $('csi-drop-target');
+  if (!drop) return;
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag-over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('drag-over');
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (csiSelectedPod) addCSISecret(data.name, data.namespace);
+    } catch {}
+  });
+})();
+
+$('btn-csi-attach').addEventListener('click', async () => {
+  if (!csiSelectedPod || !csiAttachedSecrets.length) return;
+  const result = $('csi-attach-result');
+  result.style.display = 'block';
+  result.innerHTML = '<p class="text-muted">Generating configuration...</p>';
+  try {
+    const r = await apiPost('/api/csi/attach', {
+      podName: csiSelectedPod.name,
+      namespace: csiSelectedPod.namespace,
+      secretKeys: csiAttachedSecrets.map(s => s.name),
+      mountPath: $('csi-mount-path').value || '/mnt/secrets',
+      roleName: $('csi-role-name').value || 'my-app',
+    });
+    let html = '<h4>SecretProviderClass YAML</h4><pre>' + esc(r.spcYaml || 'N/A') + '</pre>';
+    html += '<h4 style="margin-top:12px">Volume Patch</h4><pre>' + esc(r.volumePatch || 'N/A') + '</pre>';
+    if (r.message) html += '<p style="margin-top:8px;font-size:12px;color:var(--text-2)">' + esc(r.message) + '</p>';
+    result.innerHTML = html;
+  } catch (e) {
+    result.innerHTML = '<p style="color:var(--danger)">Error: ' + esc(e.message) + '</p>';
+  }
+});
 
 // ===== Metrics =====
 async function loadMetrics() {

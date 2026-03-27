@@ -65,6 +65,7 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 		copy(key, km.cachedKey)
 		version := km.keyVersion
 		km.mu.RUnlock()
+		km.logger.Debug("Ключ Кузнечик: из кеша", "version", version, "keySize", len(key)*8)
 		return key, version, nil
 	}
 	km.mu.RUnlock()
@@ -88,6 +89,11 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 		}
 		km.cachedKey = key
 		km.keyVersion = version
+		km.logger.Info("Ключ Кузнечик загружен из OpenBao KV",
+			"path", km.kvPath,
+			"version", version,
+			"keySize", len(key)*8,
+		)
 		keyCopy := make([]byte, len(key))
 		copy(keyCopy, key)
 		return keyCopy, version, nil
@@ -98,15 +104,17 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 		return nil, 0, fmt.Errorf("key not found and createKeyIfNotExists is false")
 	}
 
-	km.logger.Info("Создание нового ключа Kuznyechik в OpenBao KV", "path", km.kvPath)
+	km.logger.Info("Генерация нового ключа Кузнечик (256 бит, crypto/rand)",
+		"path", km.kvPath,
+		"algorithm", "ГОСТ Р 34.12-2015",
+		"keySize", crypto.KuznyechikKeySize*8,
+	)
 
-	// Generate 256-bit key
 	key := make([]byte, crypto.KuznyechikKeySize)
 	if _, err := rand.Read(key); err != nil {
 		return nil, 0, fmt.Errorf("generate key: %w", err)
 	}
 
-	// Store in OpenBao KV
 	writeData := map[string]interface{}{
 		"key":     base64.StdEncoding.EncodeToString(key),
 		"version": 1,
@@ -115,6 +123,11 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 	if err := km.client.KVWrite(ctx, km.kvPath, writeData); err != nil {
 		return nil, 0, fmt.Errorf("write key to OpenBao: %w", err)
 	}
+
+	km.logger.Info("Ключ Кузнечик создан и сохранён в OpenBao KV",
+		"path", km.kvPath,
+		"version", 1,
+	)
 
 	km.cachedKey = key
 	km.keyVersion = 1

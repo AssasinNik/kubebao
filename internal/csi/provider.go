@@ -126,7 +126,7 @@ func (p *Provider) Mount(ctx context.Context, req *pb.MountRequest) (*pb.MountRe
 	}
 
 	// Authenticate to OpenBao
-	authClient, err := p.authenticate(ctx, params, secrets)
+	authClient, err := p.authenticate(ctx, params, attribs, secrets)
 	if err != nil {
 		p.logger.Error("Ошибка аутентификации OpenBao", "error", err)
 		return &pb.MountResponse{
@@ -231,7 +231,7 @@ func (p *Provider) parseMountParams(attribs map[string]string) (*MountParams, er
 }
 
 // authenticate — создаёт AuthenticatedClient с JWT из ServiceAccount или secrets
-func (p *Provider) authenticate(ctx context.Context, params *MountParams, secrets map[string]string) (*AuthenticatedClient, error) {
+func (p *Provider) authenticate(ctx context.Context, params *MountParams, attribs map[string]string, secrets map[string]string) (*AuthenticatedClient, error) {
 	authConfig := &AuthConfig{
 		OpenBaoAddress: params.OpenBaoAddress,
 		AuthMethod:     params.AuthMethod,
@@ -246,22 +246,61 @@ func (p *Provider) authenticate(ctx context.Context, params *MountParams, secret
 		authConfig.OpenBaoAddress = p.config.OpenBao.Address
 	}
 
-	// Get service account token from secrets
-	if secrets != nil {
-		if saTokensStr, ok := secrets["csi.storage.k8s.io/serviceAccount.tokens"]; ok {
-			authConfig.ServiceAccountToken = saTokensStr
+	// kubelet passes SA tokens via volume_context (attribs) when CSIDriver.tokenRequests is set.
+	// Format: {"<audience>": {"token": "<jwt>", "expirationTimestamp": "..."}}
+	if attribs != nil {
+		if saTokensStr, ok := attribs["csi.storage.k8s.io/serviceAccount.tokens"]; ok && saTokensStr != "" {
+			token := extractJWTFromTokens(saTokensStr)
+			if token != "" {
+				authConfig.ServiceAccountToken = token
+				p.logger.Debug("SA токен получен из volume context",
+					"podSA", attribs["csi.storage.k8s.io/serviceAccount.name"])
+			}
 		}
 	}
 
-	// Try to read token from default location if not provided
+	// Fallback: check secrets (nodePublishSecretRef)
+	if authConfig.ServiceAccountToken == "" && secrets != nil {
+		if saTokensStr, ok := secrets["csi.storage.k8s.io/serviceAccount.tokens"]; ok {
+			token := extractJWTFromTokens(saTokensStr)
+			if token != "" {
+				authConfig.ServiceAccountToken = token
+			}
+		}
+	}
+
+	// Last resort: read CSI provider pod's own SA token
 	if authConfig.ServiceAccountToken == "" {
 		tokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token"
 		if token, err := os.ReadFile(tokenPath); err == nil {
 			authConfig.ServiceAccountToken = string(token)
+			p.logger.Warn("Используется SA токен CSI-провайдера, а не целевого пода — настройте tokenRequests в CSIDriver")
 		}
 	}
 
 	return NewAuthenticatedClient(ctx, authConfig, p.logger)
+}
+
+// extractJWTFromTokens парсит JSON-формат serviceAccount.tokens от kubelet.
+// Формат: {"<audience>": {"token": "eyJ...", "expirationTimestamp": "..."}}
+func extractJWTFromTokens(raw string) string {
+	var tokens map[string]struct {
+		Token               string `json:"token"`
+		ExpirationTimestamp string `json:"expirationTimestamp"`
+	}
+	if err := json.Unmarshal([]byte(raw), &tokens); err != nil {
+		// Maybe it's already a plain JWT
+		if len(raw) > 0 && raw[0] != '{' {
+			return raw
+		}
+		return ""
+	}
+	for _, t := range tokens {
+		if t.Token != "" {
+			return t.Token
+		}
+	}
+	return ""
 }
 
 // Run starts the CSI provider gRPC server

@@ -178,13 +178,59 @@
 
     <!-- CSI -->
     <section id="page-csi" class="page">
-      <div class="page-header"><h1>CSI Connected Pods</h1></div>
-      <p class="page-subtitle">Pods using Secrets Store CSI Driver to mount secrets from OpenBao into the filesystem.</p>
-      <div class="table-wrap">
-        <table class="data-table" id="csi-table">
-          <thead><tr><th>Pod</th><th>Namespace</th><th>Node</th><th>Status</th><th>Ready</th><th>SecretProviderClass</th><th>Mount Path</th><th>Age</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="page-header"><h1>CSI Secret Management</h1></div>
+      <p class="page-subtitle">Manage secrets mounted into pods via Secrets Store CSI Driver. Drag secrets onto a pod to attach them.</p>
+
+      <div class="csi-layout">
+        <!-- Left: Pod list -->
+        <div class="csi-pods-panel">
+          <div class="panel-header">
+            <h3>Pods</h3>
+            <select id="csi-ns-filter" class="input-select" style="width:140px"><option value="">All NS</option></select>
+          </div>
+          <div class="pod-list" id="csi-pod-list"></div>
+        </div>
+
+        <!-- Center: Drop zone / Current pod -->
+        <div class="csi-attach-panel">
+          <div class="panel-header"><h3>Attach Secrets to Pod</h3></div>
+          <div id="csi-selected-pod" class="csi-drop-zone">
+            <p class="text-muted">Select a pod from the left panel</p>
+          </div>
+          <div id="csi-drop-target" class="csi-drop-area" style="display:none">
+            <p>Drop secrets here or click to select</p>
+            <div id="csi-attached-secrets" class="attached-secrets-list"></div>
+          </div>
+          <div class="csi-attach-config" id="csi-attach-config" style="display:none">
+            <div class="form-group" style="margin-top:8px">
+              <label>Mount Path</label>
+              <input type="text" id="csi-mount-path" value="/mnt/secrets" class="input-filter">
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label>OpenBao Role</label>
+              <input type="text" id="csi-role-name" value="my-app" class="input-filter">
+            </div>
+            <button class="btn btn-primary" id="btn-csi-attach" style="margin-top:12px">Generate Config</button>
+            <div id="csi-attach-result" style="display:none;margin-top:12px"></div>
+          </div>
+        </div>
+
+        <!-- Right: Available secrets -->
+        <div class="csi-secrets-panel">
+          <div class="panel-header"><h3>Available Secrets</h3></div>
+          <input type="text" id="csi-secret-search" placeholder="Search secrets..." class="input-filter" style="margin-bottom:8px;width:100%">
+          <div class="secret-drag-list" id="csi-secret-list"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:24px">
+        <div class="panel-header"><h3>Currently Connected CSI Pods</h3></div>
+        <div class="table-wrap">
+          <table class="data-table" id="csi-table">
+            <thead><tr><th>Pod</th><th>Namespace</th><th>Node</th><th>Status</th><th>Ready</th><th>SecretProviderClass</th><th>Mount Path</th><th>Age</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
 

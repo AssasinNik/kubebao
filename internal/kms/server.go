@@ -165,14 +165,20 @@ func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusR
 
 // Encrypt encrypts the given plaintext using the transit secrets engine
 func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.EncryptResponse, error) {
-	s.logger.Debug("Запрос шифрования", "uid", req.Uid, "plaintextSize", len(req.Plaintext))
+	s.logger.Info("KMS Encrypt запрос",
+		"uid", req.Uid,
+		"plaintextSize", len(req.Plaintext),
+		"algorithm", "Кузнечик (ГОСТ Р 34.12-2015)",
+		"mode", "CTR+CMAC (ГОСТ Р 34.13-2015)",
+	)
 
 	if len(req.Plaintext) == 0 {
 		return nil, fmt.Errorf("plaintext cannot be empty")
 	}
 
-	// Encrypt using provider
+	start := time.Now()
 	ciphertext, err := s.provider.Encrypt(ctx, s.config.KeyName, req.Plaintext)
+	elapsed := time.Since(start)
 	if err != nil {
 		s.logger.Error("Ошибка шифрования", "error", err, "uid", req.Uid)
 		return nil, fmt.Errorf("encryption failed: %w", err)
@@ -183,12 +189,17 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	s.mu.RUnlock()
 
 	// KMS v2: ключи аннотаций должны быть FQDN (k8s validateAnnotations → IsFullyQualifiedDomainName).
-	// Стиль "prefix/name" здесь недопустим — слэш ломает проверку и даёт kms-providers failed.
 	annotations := map[string][]byte{
 		"kms-key.kubebao.io": []byte(s.config.KeyName),
 	}
 
-	s.logger.Debug("Шифрование выполнено успешно", "uid", req.Uid, "ciphertextSize", len(ciphertext))
+	s.logger.Info("KMS Encrypt выполнен",
+		"uid", req.Uid,
+		"keyID", keyID,
+		"plaintextSize", len(req.Plaintext),
+		"ciphertextSize", len(ciphertext),
+		"duration", elapsed,
+	)
 
 	return &v2.EncryptResponse{
 		Ciphertext:  []byte(ciphertext),
@@ -199,20 +210,30 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 
 // Decrypt decrypts the given ciphertext using the transit secrets engine
 func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.DecryptResponse, error) {
-	s.logger.Debug("Запрос дешифрования", "uid", req.Uid, "keyId", req.KeyId, "ciphertextSize", len(req.Ciphertext))
+	s.logger.Info("KMS Decrypt запрос",
+		"uid", req.Uid,
+		"keyId", req.KeyId,
+		"ciphertextSize", len(req.Ciphertext),
+	)
 
 	if len(req.Ciphertext) == 0 {
 		return nil, fmt.Errorf("ciphertext cannot be empty")
 	}
 
-	// Decrypt using provider
+	start := time.Now()
 	plaintext, err := s.provider.Decrypt(ctx, s.config.KeyName, string(req.Ciphertext))
+	elapsed := time.Since(start)
 	if err != nil {
 		s.logger.Error("Ошибка дешифрования", "error", err, "uid", req.Uid)
 		return nil, fmt.Errorf("decryption failed: %w", err)
 	}
 
-	s.logger.Debug("Дешифрование выполнено успешно", "uid", req.Uid, "plaintextSize", len(plaintext))
+	s.logger.Info("KMS Decrypt выполнен",
+		"uid", req.Uid,
+		"keyId", req.KeyId,
+		"plaintextSize", len(plaintext),
+		"duration", elapsed,
+	)
 
 	return &v2.DecryptResponse{
 		Plaintext: plaintext,

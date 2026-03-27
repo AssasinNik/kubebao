@@ -48,6 +48,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.Handle("/api/secrets/decrypt", s.authMiddleware(http.HandlerFunc(s.api.DecryptSecret)))
 	mux.Handle("/api/csi/pods", s.authMiddleware(http.HandlerFunc(s.api.CSIPods)))
 	mux.Handle("/api/csi/classes", s.authMiddleware(http.HandlerFunc(s.api.CSIClasses)))
+	mux.Handle("/api/csi/all-pods", s.authMiddleware(http.HandlerFunc(s.api.AllPods)))
+	mux.Handle("/api/csi/attach", s.authMiddleware(http.HandlerFunc(s.api.CSIAttachSecret)))
 	mux.Handle("/api/metrics", s.authMiddleware(http.HandlerFunc(s.api.Metrics)))
 	mux.Handle("/api/openbao", s.authMiddleware(http.HandlerFunc(s.api.OpenBaoInfo)))
 	mux.Handle("/api/cluster", s.authMiddleware(http.HandlerFunc(s.api.ClusterInfo)))

@@ -392,6 +392,58 @@ body {
 .empty-state { text-align: center; padding: 32px 16px; color: var(--text-3); }
 .empty-state p { font-size: 13px; }
 
+/* ===== CSI ATTACH ===== */
+.csi-layout { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 16px; margin-top: 16px; }
+.csi-pods-panel, .csi-attach-panel, .csi-secrets-panel {
+  background: var(--surface-1); border-radius: 10px; border: 1px solid var(--border); padding: 14px;
+}
+.panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.panel-header h3 { font-size: 13px; font-weight: 600; color: var(--text-0); margin: 0; }
+
+.pod-list, .secret-drag-list { max-height: 350px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+
+.pod-item {
+  padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer;
+  font-size: 12px; transition: all .15s; display: flex; align-items: center; gap: 8px;
+}
+.pod-item:hover { border-color: var(--accent); background: rgba(59,130,246,.05); }
+.pod-item.selected { border-color: var(--accent); background: rgba(59,130,246,.1); }
+.pod-item .pod-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pod-item .pod-status.Running { background: var(--success); }
+.pod-item .pod-status.Pending { background: var(--warning); }
+.pod-item .pod-status.Failed { background: var(--danger); }
+.pod-item .pod-info { flex: 1; min-width: 0; }
+.pod-item .pod-name { font-weight: 500; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pod-item .pod-ns { color: var(--text-3); font-size: 11px; }
+
+.secret-drag-item {
+  padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); cursor: grab;
+  font-size: 12px; transition: all .15s; user-select: none;
+}
+.secret-drag-item:hover { border-color: var(--accent); background: rgba(59,130,246,.05); }
+.secret-drag-item.dragging { opacity: .5; border-style: dashed; }
+.secret-drag-item .secret-name { font-weight: 500; color: var(--text-0); }
+.secret-drag-item .secret-ns { color: var(--text-3); font-size: 11px; }
+
+.csi-drop-zone { text-align: center; padding: 20px; border-radius: 8px; border: 2px dashed var(--border); min-height: 60px; display: flex; align-items: center; justify-content: center; }
+.csi-drop-area { padding: 12px; border-radius: 8px; border: 2px dashed var(--accent); min-height: 60px; margin-top: 10px; text-align: center; color: var(--text-3); font-size: 12px; transition: all .2s; }
+.csi-drop-area.drag-over { background: rgba(59,130,246,.1); border-color: var(--accent); }
+
+.attached-secrets-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.attached-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 14px;
+  background: var(--accent-dim); color: var(--accent); font-size: 11px; font-weight: 500;
+}
+.attached-chip .chip-remove { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; }
+.attached-chip .chip-remove:hover { opacity: 1; }
+
+.csi-attach-config { padding-top: 8px; }
+.csi-attach-config .form-group label { font-size: 11px; color: var(--text-2); display: block; margin-bottom: 4px; }
+
+#csi-attach-result { background: var(--surface-0); border-radius: 8px; border: 1px solid var(--border); padding: 12px; }
+#csi-attach-result pre { font-size: 11px; white-space: pre-wrap; word-break: break-all; color: var(--text-1); margin: 8px 0 0; background: var(--bg); padding: 10px; border-radius: 6px; max-height: 200px; overflow: auto; }
+#csi-attach-result h4 { font-size: 12px; color: var(--text-0); margin: 0 0 4px; }
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 900px) {
   .sidebar { width: 52px; }

@@ -5,7 +5,6 @@ package kms
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/kubebao/kubebao/internal/crypto"
@@ -28,16 +27,19 @@ func NewKuznyechikProvider(keyManager *KeyManager, logger hclog.Logger) *Kuznyec
 
 // Encrypt шифрует plaintext алгоритмом Кузнечик-CTR + CMAC (ГОСТ Р 34.13-2015).
 func (p *KuznyechikProvider) Encrypt(ctx context.Context, keyName string, plaintext []byte) (string, error) {
-	start := time.Now()
-	defer func() {
-		p.logger.Debug("Kuznyechik шифрование завершено", "duration", time.Since(start))
-	}()
-
-	key, _, err := p.keyManager.GetOrCreateKey(ctx)
+	key, version, err := p.keyManager.GetOrCreateKey(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get key: %w", err)
 	}
 	defer zeroBytes(key)
+
+	p.logger.Info("Кузнечик: шифрование",
+		"keyName", keyName,
+		"keyVersion", version,
+		"keySize", len(key)*8,
+		"plaintextSize", len(plaintext),
+		"algorithm", "Кузнечик-CTR + CMAC (ГОСТ Р 34.12/34.13-2015)",
+	)
 
 	aead, err := crypto.NewKuznyechikAEAD(key)
 	if err != nil {
@@ -49,23 +51,29 @@ func (p *KuznyechikProvider) Encrypt(ctx context.Context, keyName string, plaint
 		return "", fmt.Errorf("encrypt: %w", err)
 	}
 
+	p.logger.Info("Кузнечик: шифрование завершено",
+		"ciphertextSize", len(ciphertext),
+		"overhead", len(ciphertext)-len(plaintext),
+	)
+
 	return string(ciphertext), nil
 }
 
 // Decrypt дешифрует и проверяет CMAC-тег (ГОСТ Р 34.13-2015).
 func (p *KuznyechikProvider) Decrypt(ctx context.Context, keyName string, ciphertextStr string) ([]byte, error) {
-	start := time.Now()
-	defer func() {
-		p.logger.Debug("Kuznyechik дешифрование завершено", "duration", time.Since(start))
-	}()
-
 	ciphertext := []byte(ciphertextStr)
 
-	key, _, err := p.keyManager.GetOrCreateKey(ctx)
+	key, version, err := p.keyManager.GetOrCreateKey(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get key: %w", err)
 	}
 	defer zeroBytes(key)
+
+	p.logger.Info("Кузнечик: дешифрование",
+		"keyName", keyName,
+		"keyVersion", version,
+		"ciphertextSize", len(ciphertext),
+	)
 
 	aead, err := crypto.NewKuznyechikAEAD(key)
 	if err != nil {
@@ -74,9 +82,13 @@ func (p *KuznyechikProvider) Decrypt(ctx context.Context, keyName string, cipher
 
 	plaintext, err := aead.Decrypt(ciphertext)
 	if err != nil {
-		p.logger.Error("Ошибка дешифрования Kuznyechik", "error", err)
+		p.logger.Error("Кузнечик: CMAC верификация не пройдена — данные повреждены или ключ неверный", "error", err)
 		return nil, fmt.Errorf("decrypt: %w", err)
 	}
+
+	p.logger.Info("Кузнечик: дешифрование завершено, CMAC верифицирован",
+		"plaintextSize", len(plaintext),
+	)
 
 	return plaintext, nil
 }

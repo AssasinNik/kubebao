@@ -540,6 +540,177 @@ func (h *APIHandler) CSIClasses(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// AllPods returns all pods in the cluster (for CSI attach UI).
+func (h *APIHandler) AllPods(w http.ResponseWriter, r *http.Request) {
+	if h.k8s == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+	ns := r.URL.Query().Get("namespace")
+	pods, err := h.k8s.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{Limit: 500})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var entries []map[string]interface{}
+	for _, p := range pods.Items {
+		if strings.HasPrefix(p.Namespace, "kube-") {
+			continue
+		}
+		ready := 0
+		total := len(p.Status.ContainerStatuses)
+		for _, cs := range p.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+		}
+
+		csiSecrets := []string{}
+		for _, vol := range p.Spec.Volumes {
+			if vol.CSI != nil && vol.CSI.Driver == "secrets-store.csi.k8s.io" {
+				if vol.CSI.VolumeAttributes != nil {
+					csiSecrets = append(csiSecrets, vol.CSI.VolumeAttributes["secretProviderClass"])
+				}
+			}
+		}
+
+		ownerKind := ""
+		ownerName := ""
+		if len(p.OwnerReferences) > 0 {
+			ownerKind = p.OwnerReferences[0].Kind
+			ownerName = p.OwnerReferences[0].Name
+		}
+
+		entries = append(entries, map[string]interface{}{
+			"name":       p.Name,
+			"namespace":  p.Namespace,
+			"status":     string(p.Status.Phase),
+			"ready":      fmt.Sprintf("%d/%d", ready, total),
+			"node":       p.Spec.NodeName,
+			"ownerKind":  ownerKind,
+			"ownerName":  ownerName,
+			"csiSecrets": csiSecrets,
+			"containers": len(p.Spec.Containers),
+			"age":        time.Since(p.CreationTimestamp.Time).Round(time.Second).String(),
+		})
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// CSIAttachSecret creates a SecretProviderClass and patches the Deployment to mount secrets.
+func (h *APIHandler) CSIAttachSecret(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.k8s == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not connected to cluster"})
+		return
+	}
+
+	var req struct {
+		PodName    string   `json:"podName"`
+		Namespace  string   `json:"namespace"`
+		SecretKeys []string `json:"secretKeys"`
+		MountPath  string   `json:"mountPath"`
+		RoleName   string   `json:"roleName"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Namespace == "" {
+		req.Namespace = "default"
+	}
+	if req.MountPath == "" {
+		req.MountPath = "/mnt/secrets"
+	}
+	if req.RoleName == "" {
+		req.RoleName = "my-app"
+	}
+
+	// Build SecretProviderClass objects YAML
+	objects := []map[string]string{}
+	for _, sk := range req.SecretKeys {
+		objects = append(objects, map[string]string{
+			"objectName": sk,
+			"secretPath": "secret/data/" + sk,
+		})
+	}
+	objectsJSON, _ := json.Marshal(objects)
+
+	spcName := fmt.Sprintf("kubebao-csi-%s", req.PodName)
+
+	// Find the owning Deployment/ReplicaSet
+	pod, err := h.k8s.CoreV1().Pods(req.Namespace).Get(context.Background(), req.PodName, metav1.GetOptions{})
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pod not found: " + err.Error()})
+		return
+	}
+
+	deploymentName := ""
+	for _, or := range pod.OwnerReferences {
+		if or.Kind == "ReplicaSet" {
+			rs, rsErr := h.k8s.AppsV1().ReplicaSets(req.Namespace).Get(context.Background(), or.Name, metav1.GetOptions{})
+			if rsErr == nil {
+				for _, rsOR := range rs.OwnerReferences {
+					if rsOR.Kind == "Deployment" {
+						deploymentName = rsOR.Name
+					}
+				}
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"success":              true,
+		"secretProviderClass":  spcName,
+		"objects":              string(objectsJSON),
+		"mountPath":            req.MountPath,
+		"deploymentName":       deploymentName,
+		"message":              fmt.Sprintf("Для привязки: создайте SecretProviderClass '%s' и добавьте CSI volume в Deployment '%s'", spcName, deploymentName),
+	}
+
+	if deploymentName != "" {
+		patchYAML := fmt.Sprintf(`apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  provider: kubebao
+  parameters:
+    roleName: "%s"
+    objects: |
+`, spcName, req.Namespace, req.RoleName)
+		for _, sk := range req.SecretKeys {
+			patchYAML += fmt.Sprintf("      - objectName: \"%s\"\n        secretPath: \"secret/data/%s\"\n", sk, sk)
+		}
+		result["spcYaml"] = patchYAML
+
+		volumePatch := fmt.Sprintf(`spec:
+  template:
+    spec:
+      volumes:
+      - name: kubebao-secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: %s
+      containers:
+      - name: "*"
+        volumeMounts:
+        - name: kubebao-secrets
+          mountPath: %s
+          readOnly: true`, spcName, req.MountPath)
+		result["volumePatch"] = volumePatch
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 // ---------- OpenBao ----------
 
 func (h *APIHandler) OpenBaoInfo(w http.ResponseWriter, _ *http.Request) {

@@ -886,7 +886,7 @@ kubectl describe ingress kubebao-ui -n kubebao-system
 | **Keys** | Ключ шифрования: имя, путь в KV, версия, дата создания, последняя ротация, стандарт. **Show Key** — показать текущее значение ключа из OpenBao. **Rotate Key** — сгенерировать новый ключ |
 | **Secrets** | Kubernetes Secrets: имя, namespace, тип, ключи данных, размер, возраст. Фильтрация по namespace и имени. Клик по секрету открывает модальное окно с полной информацией (UID, labels, annotations, все data-ключи в base64) |
 | **OpenBao** | Адрес, версия, seal status, secret engines (mounts), auth methods |
-| **CSI Pods** | Поды с CSI Driver: имя, node, status, ready, SecretProviderClass, mount path, возраст |
+| **CSI Secret Management** | Управление секретами через CSI: список всех подов, drag-and-drop секретов на под, генерация SecretProviderClass YAML и volume patch. Также: таблица уже подключённых CSI-подов |
 | **Metrics** | Операции encrypt/decrypt, GC, heap/stack/sys memory, live objects, goroutines, CPU cores, uptime. Графики timeline |
 | **Decrypt** | Расшифровка: вставьте 256-битный мастер-ключ (base64) и ciphertext — UI расшифрует через Kuznyechik AEAD |
 
@@ -1239,7 +1239,7 @@ curl -s -X POST "http://127.0.0.1:8200/v1/secret/data/myapp/config" \
   -d '{"data":{"api_key":"NEW-KEY-UPDATED","environment":"staging","debug":"true"}}'
 ```
 
-Подождите `refreshInterval` (по умолчанию 1h, в примере — 30s–1h) и проверьте:
+Подождите `refreshInterval` (по умолчанию 1 минута) и проверьте:
 
 ```bash
 kubectl get secret my-app-secret -o jsonpath='{.data.api_key}' | base64 -d
@@ -1250,13 +1250,62 @@ echo
 
 ## 10. Тестирование CSI Provider
 
-### 10.1 Применение SecretProviderClass
+### 10.1 Подготовка: ServiceAccount и OpenBao роль
+
+CSI провайдер аутентифицируется в OpenBao через Kubernetes Auth с JWT пода. Нужно:
+
+1. **Создать ServiceAccount** для пода:
+
+```bash
+kubectl create serviceaccount my-app -n default
+```
+
+2. **Настроить OpenBao Kubernetes Auth** (если ещё не сделано):
+
+```bash
+export BAO_TOKEN="<ваш root token>"
+export BAO_ADDR="http://127.0.0.1:8200"
+
+# Получить CA кластера и JWT для token review
+K8S_HOST="https://$(kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'):443"
+K8S_CA=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d)
+REVIEWER_JWT=$(kubectl exec -n openbao openbao-0 -- cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+# Включить Kubernetes Auth (если ещё не включён)
+curl -s -X POST "$BAO_ADDR/v1/sys/auth/kubernetes" \
+  -H "X-Vault-Token: $BAO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"type":"kubernetes"}'
+
+# Настроить конфигурацию auth
+curl -s -X POST "$BAO_ADDR/v1/auth/kubernetes/config" \
+  -H "X-Vault-Token: $BAO_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"kubernetes_host\":\"$K8S_HOST\",\"kubernetes_ca_cert\":$(echo "$K8S_CA" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'),\"token_reviewer_jwt\":\"$REVIEWER_JWT\"}"
+
+# Создать политику
+curl -s -X PUT "$BAO_ADDR/v1/sys/policy/my-app" \
+  -H "X-Vault-Token: $BAO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"policy":"path \"secret/data/myapp/*\" { capabilities = [\"read\",\"list\"] }"}'
+
+# Создать роль для ServiceAccount
+curl -s -X POST "$BAO_ADDR/v1/auth/kubernetes/role/my-app" \
+  -H "X-Vault-Token: $BAO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"bound_service_account_names":["my-app"],"bound_service_account_namespaces":["default"],"policies":["my-app"],"ttl":"1h"}'
+```
+
+3. **Патч CSIDriver** для передачи SA-токена пода:
+
+```bash
+kubectl patch csidriver secrets-store.csi.k8s.io --type='json' \
+  -p='[{"op":"add","path":"/spec/tokenRequests","value":[{"audience":"","expirationSeconds":3600}]}]'
+```
+
+### 10.2 Применение SecretProviderClass
 
 ```bash
 kubectl apply -f config/samples/secretproviderclass_sample.yaml
 ```
 
-### 10.2 Создание тестового пода
+### 10.3 Создание тестового пода
 
 ```bash
 cat << 'EOF' | kubectl apply -f -
@@ -1266,7 +1315,7 @@ metadata:
   name: test-csi-secrets
   namespace: default
 spec:
-  serviceAccountName: default
+  serviceAccountName: my-app
   containers:
   - name: busybox
     image: busybox:1.36
@@ -1285,7 +1334,7 @@ spec:
 EOF
 ```
 
-### 10.3 Проверка секретов в поде
+### 10.4 Проверка секретов в поде
 
 ```bash
 kubectl wait --for=condition=ready pod test-csi-secrets --timeout=60s
