@@ -629,6 +629,35 @@ helm install kubebao kubebao/kubebao \
 
 Если `helm install` падает с `failed to fetch .../.deploy/kubebao-*.tgz : 404`, в кэше `index.yaml` устаревший URL: на GitHub Pages архив лежит в корне (`.../kubebao-0.1.1.tgz`), а не под `/.deploy/`. Выполните `helm repo remove kubebao && helm repo add kubebao https://assasinnik.github.io/kubebao && helm repo update`. После исправления публикации чарта в репозитории индекс обновится автоматически.
 
+### 5.5.1 GHCR: ошибка `unauthorized` при pull только `kubebao-ui`
+
+У пакетов в GitHub Container Registry видимость задаётся **отдельно для каждого имени** (`kubebao-kms`, `kubebao-csi`, `kubebao-operator`, `kubebao-ui`). Часть образов может быть **public**, а **`kubebao-ui` — private**; тогда остальные поды стартуют, а UI в `ImagePullBackOff` с `error from registry: unauthorized`.
+
+Проверка (нужен `gh` и scope `read:packages`):
+
+```bash
+for p in kubebao-kms kubebao-csi kubebao-operator kubebao-ui; do
+  printf '%s: ' "$p"
+  gh api "/user/packages/container/$p" --jq .visibility 2>/dev/null || echo "(нет доступа)"
+done
+```
+
+**Сделать `kubebao-ui` публичным (удобнее всего в браузере):**
+
+1. Откройте [страницу пакета `kubebao-ui` на GitHub](https://github.com/users/AssasinNik/packages/container/package/kubebao-ui) (подставьте свой логин, если форк).
+2. **Package settings** → **Change package visibility** → **Public** → подтвердите.
+
+**Через CLI** (нужно расширить токен `gh` scope **`write:packages`**, команда интерактивная):
+
+```bash
+gh auth refresh -h github.com -s write:packages
+gh api --method PATCH "/user/packages/container/kubebao-ui" -f visibility=public
+```
+
+Убедитесь, что ответ без ошибки; затем на ноде при необходимости: `kubectl delete pod -n kubebao-system -l app.kubernetes.io/component=ui`.
+
+Альтернатива без смены видимости: [Kubernetes `imagePullSecret`](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/) с PAT (`read:packages`) и `global.imagePullSecrets` в Helm (см. `values.yaml`).
+
 ### 5.6 Проверка установки
 
 ```bash
