@@ -118,10 +118,14 @@ jobs:
       - name: Copy chart to gh-pages (existing branch)
         if: steps.gh-pages.outputs.branch_exists == 'true'
         run: |
+          OWNER_LC=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          REPO_LC=$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')
           cp .deploy/*.tgz gh-pages/
           cd gh-pages
-          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          git add .
+          # .deploy/*.tgz on gh-pages breaks index URLs (.deploy/ is often 404 on GitHub Pages)
+          rm -rf .deploy
+          helm repo index . --url "https://${OWNER_LC}.github.io/${REPO_LC}"
+          git add -A
           git commit -m "Release ${{ steps.version.outputs.VERSION }}" || echo "Nothing to commit"
           git pull --rebase origin gh-pages || true
           git push origin gh-pages
@@ -129,10 +133,13 @@ jobs:
       - name: Update gh-pages (new branch)
         if: steps.gh-pages.outputs.branch_exists == 'false'
         run: |
+          OWNER_LC=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          REPO_LC=$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')
           git checkout gh-pages
           cp .deploy/*.tgz .
-          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          git add .
+          rm -rf .deploy
+          helm repo index . --url "https://${OWNER_LC}.github.io/${REPO_LC}"
+          git add -A
           git commit -m "Release ${{ steps.version.outputs.VERSION }}"
           git push origin gh-pages
 

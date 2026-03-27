@@ -45,13 +45,14 @@ jobs:
             git rm -rf . || true
           fi
           
-          # Copy packaged charts
-          cp -r .deploy/* . 2>/dev/null || true
-          
-          # Create/update index
-          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          # Copy packaged charts (only .tgz from build dir; never commit a .deploy/ tree into pages)
+          cp .deploy/*.tgz . 2>/dev/null || true
+          OWNER_LC=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          REPO_LC=$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')
+          rm -rf .deploy
+          helm repo index . --url "https://${OWNER_LC}.github.io/${REPO_LC}"
           
           # Commit and push
-          git add .
+          git add -A
           git commit -m "Update Helm chart" || echo "No changes to commit"
           git push origin gh-pages --force

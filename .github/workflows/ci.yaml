@@ -250,7 +250,10 @@ jobs:
           fi
           cp .deploy/*.tgz /tmp/gh-pages/
           cd /tmp/gh-pages
-          helm repo index . --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          git add .
+          OWNER_LC=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          REPO_LC=$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')
+          rm -rf .deploy
+          helm repo index . --url "https://${OWNER_LC}.github.io/${REPO_LC}"
+          git add -A
           git commit -m "Publish Helm chart ${VERSION}" || echo "No changes to commit"
           git push origin gh-pages
