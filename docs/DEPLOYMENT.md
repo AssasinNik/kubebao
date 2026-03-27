@@ -641,7 +641,7 @@ kubectl get deployments -n kubebao-system
 
 ```bash
 # Логи KMS — убедиться, что Кузнечик активирован
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=10
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=10
 ```
 
 Ожидаемая строка в логах:
@@ -939,6 +939,8 @@ helm upgrade kubebao ./charts/kubebao \
 
 Этот файл одинаков для всех платформ. Его нужно разместить **на control-plane узле** (внутри VM для Rancher Desktop):
 
+> **macOS / Rancher Desktop:** команды только через `rdctl shell -- …`. `sudo tee /etc/kubernetes/...` **на хосте Mac** пишет не в VM k3s — появится `No such file or directory`, пока вы сами не создадите каталог на Mac; для кластера это не используется.
+
 **Rancher Desktop / k3s:**
 
 ```bash
@@ -1044,7 +1046,7 @@ kube-apiserver перезапустится автоматически (static p
 После перезапуска kube-apiserver должен подключиться к KMS-сокету. Убедитесь, что KMS-под работает:
 
 ```bash
-kubectl get pods -n kubebao-system -l app=kubebao-kms
+kubectl get pods -n kubebao-system -l app.kubernetes.io/component=kms
 # NAME                READY   STATUS    RESTARTS   AGE
 # kubebao-kms-xxxxx   1/1     Running   0          2m
 ```
@@ -1062,12 +1064,15 @@ kubectl get --raw /healthz 2>&1 | tr '\\n' '\n' | grep kms
 # 1. Сокет существует?
 rdctl shell -- sudo ls -la /var/run/kubebao/kms.sock
 
-# 2. Права доступа: должно быть srwxrwxrwx (0666)
-# Если srw------- (0600) — KMS-под нужно перезапустить:
-kubectl delete pod -n kubebao-system -l app=kubebao-kms
+# 2. Права на сокет: srwxrwxrwx (0666). Если srw------- (0600) — образ KMS старый; обновите чарт / пересоберите KMS.
+
+# 2b. Права на каталог (на ноде в VM): `drwx--x--x` (711) и владелец 10123 — чтобы kube-apiserver мог
+# «пройти» путь к сокету; при `drwx------` (700) часто бывает kms-providers failed на k3s.
+
+kubectl delete pod -n kubebao-system -l app.kubernetes.io/component=kms
 
 # 3. KMS-логи:
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=20
 ```
 
 > **Примечание:** при первом запуске KMS создаёт 256-битный ключ Кузнечика в OpenBao KV при поступлении первого запроса шифрования. Можно создать ключ вручную (см. раздел 7.5).
@@ -1083,7 +1088,7 @@ kubectl get secrets --all-namespaces -o json | kubectl replace -f -
 Проверьте логи KMS — должны появиться записи шифрования:
 
 ```bash
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=10
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=10
 # Запрос шифрования uid=... plaintextSize=...
 # Шифрование выполнено успешно uid=... ciphertextSize=...
 ```
@@ -1145,7 +1150,7 @@ echo
 ### 8.3 Проверка логов KMS
 
 ```bash
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=20
 ```
 
 Если KMS настроен (раздел 7), в логах будут строки:
@@ -1310,7 +1315,7 @@ ETCDCTL_API=3 etcdctl \
 ### 11.3 Проверка через логи KMS
 
 ```bash
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=50
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=50
 ```
 
 При каждом создании/чтении секрета в логах видны:
@@ -1336,7 +1341,7 @@ curl -s -X POST "http://127.0.0.1:8200/v1/secret/data/kubebao/kms-keys/kubebao-k
 
 # 3. KMS-плагин обнаружит новый ключ при health check (≤30 сек)
 # Проверка:
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=5
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=5
 # Ожидаемая строка: "Версия ключа изменилась"
 
 # 4. Перешифровать все существующие секреты новым ключом:
@@ -1395,13 +1400,13 @@ helm upgrade kubebao kubebao/kubebao \
 
 ```bash
 # Логи
-kubectl logs -n kubebao-system -l app=kubebao-kms
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms
 
 # Описание пода
-kubectl describe pod -n kubebao-system -l app=kubebao-kms
+kubectl describe pod -n kubebao-system -l app.kubernetes.io/component=kms
 
 # Проверить доступность OpenBao из пода
-kubectl exec -n kubebao-system $(kubectl get pod -n kubebao-system -l app=kubebao-kms -o jsonpath='{.items[0].metadata.name}') \
+kubectl exec -n kubebao-system $(kubectl get pod -n kubebao-system -l app.kubernetes.io/component=kms -o jsonpath='{.items[0].metadata.name}') \
   -- wget -q -O- http://openbao.openbao.svc.cluster.local:8200/v1/sys/health
 ```
 
@@ -1421,7 +1426,7 @@ kubectl get events --field-selector involvedObject.kind=BaoSecret
 ### CSI секреты не монтируются
 
 ```bash
-kubectl logs -n kubebao-system -l app=kubebao-csi
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=csi
 kubectl describe pod <pod-with-csi-volume>
 kubectl get secretproviderclass <name> -o yaml
 ```
@@ -1462,8 +1467,8 @@ kubectl get baopolicies -A
 kubectl get secretproviderclasses -A
 
 # Логи всех компонентов
-kubectl logs -n kubebao-system -l app=kubebao-kms --tail=20
-kubectl logs -n kubebao-system -l app=kubebao-csi --tail=20
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=kms --tail=20
+kubectl logs -n kubebao-system -l app.kubernetes.io/component=csi --tail=20
 kubectl logs -n kubebao-system -l app.kubernetes.io/name=kubebao-operator --tail=20
 kubectl logs -n kubebao-system -l app.kubernetes.io/component=ui --tail=20
 ```

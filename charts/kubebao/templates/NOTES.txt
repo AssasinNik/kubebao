@@ -20,7 +20,7 @@
 
   2. View KMS logs (encryption provider):
 
-     kubectl logs -n {{ .Release.Namespace }} -l app=kubebao-kms --tail=20
+     kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=kms --tail=20
 
 {{- if .Values.ui.enabled }}
 
