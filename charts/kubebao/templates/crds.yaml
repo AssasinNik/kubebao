@@ -101,6 +101,17 @@ spec:
                 type: object
                 additionalProperties:
                   type: string
+              template:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  stringData:
+                    type: object
+                    additionalProperties:
+                      type: string
               suspendSync:
                 type: boolean
           status:

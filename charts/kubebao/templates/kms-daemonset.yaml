@@ -40,7 +40,7 @@ spec:
           image: {{ include "kubebao.image" (dict "root" . "image" .Values.kms.image) }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
           args:
-            - --log-level=info
+            - --log-level=debug
           env:
             - name: OPENBAO_ADDR
               value: {{ .Values.global.openbao.address | quote }}
