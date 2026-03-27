@@ -627,7 +627,7 @@ helm install kubebao kubebao/kubebao \
   --set csi.driver.install=false
 ```
 
-Если `helm install` падает с `failed to fetch .../.deploy/kubebao-*.tgz : 404`, в кэше `index.yaml` устаревший URL: на GitHub Pages архив лежит в корне (`.../kubebao-0.1.1.tgz`), а не под `/.deploy/`. Выполните `helm repo remove kubebao && helm repo add kubebao https://assasinnik.github.io/kubebao && helm repo update`. После исправления публикации чарта в репозитории индекс обновится автоматически.
+Если `helm install` падает с `failed to fetch .../.deploy/kubebao-*.tgz : 404`, в кэше `index.yaml` устаревший URL: на GitHub Pages архив лежит в корне (`.../kubebao-0.1.2.tgz`), а не под `/.deploy/`. Выполните `helm repo remove kubebao && helm repo add kubebao https://assasinnik.github.io/kubebao && helm repo update`. После исправления публикации чарта в репозитории индекс обновится автоматически.
 
 ### 5.5.1 GHCR: ошибка `unauthorized` при pull только `kubebao-ui`
 
