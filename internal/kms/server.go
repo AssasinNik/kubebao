@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -24,6 +25,13 @@ const (
 
 // Server — реализация gRPC KeyManagementService v2. Kubernetes вызывает Encrypt/Decrypt
 // для секретов с encryptionConfiguration. Работает через Unix socket.
+//
+// KMS v2 контракт (из kubernetes/kms reference):
+//   - Status вызывается часто (apiserver проверяет здоровье + keyID)
+//   - Encrypt вызывается при генерации/ротации DEK (редко: при старте + при смене keyID)
+//   - Decrypt вызывается при чтении секрета из etcd с устаревшим DEK
+//
+// apiserver кеширует DEK, пока keyID в Status не изменится.
 type Server struct {
 	v2.UnimplementedKeyManagementServiceServer
 
@@ -33,6 +41,10 @@ type Server struct {
 	mu       sync.RWMutex
 	keyID    string
 	healthy  bool
+
+	encryptCount atomic.Int64
+	decryptCount atomic.Int64
+	statusCount  atomic.Int64
 }
 
 // NewServer — создаёт KMS сервер с провайдером Кузнечик (ГОСТ Р 34.12-2015).
@@ -146,8 +158,12 @@ func (s *Server) initialize(ctx context.Context) error {
 	return nil
 }
 
-// Status returns the status of the KMS plugin
+// Status returns the status of the KMS plugin.
+// apiserver вызывает Status часто — при изменении keyID apiserver инвалидирует DEK-кеш
+// и вызывает Encrypt для генерации нового DEK.
 func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusResponse, error) {
+	s.statusCount.Add(1)
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -156,6 +172,13 @@ func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusR
 		healthStatus = "unhealthy"
 	}
 
+	s.logger.Debug("KMS Status",
+		"keyID", s.keyID,
+		"healthy", s.healthy,
+		"totalEncrypt", s.encryptCount.Load(),
+		"totalDecrypt", s.decryptCount.Load(),
+	)
+
 	return &v2.StatusResponse{
 		Version: APIVersion,
 		Healthz: healthStatus,
@@ -163,11 +186,16 @@ func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusR
 	}, nil
 }
 
-// Encrypt encrypts the given plaintext using the transit secrets engine
+// Encrypt encrypts the given plaintext using the configured provider.
+// В KMS v2 apiserver вызывает Encrypt при генерации нового DEK (старт, ротация keyID).
+// apiserver затем кеширует DEK и шифрует секреты локально — поэтому Encrypt вызывается
+// редко, а не на каждый Secret. Это нормальное поведение KMS v2.
 func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.EncryptResponse, error) {
-	s.logger.Info("KMS Encrypt запрос",
+	n := s.encryptCount.Add(1)
+	s.logger.Info("KMS Encrypt запрос (обёртка DEK для apiserver)",
 		"uid", req.Uid,
 		"plaintextSize", len(req.Plaintext),
+		"encryptCallN", n,
 		"algorithm", "Кузнечик (ГОСТ Р 34.12-2015)",
 		"mode", "CTR+CMAC (ГОСТ Р 34.13-2015)",
 	)
@@ -188,7 +216,6 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	keyID := s.keyID
 	s.mu.RUnlock()
 
-	// KMS v2: ключи аннотаций должны быть FQDN (k8s validateAnnotations → IsFullyQualifiedDomainName).
 	annotations := map[string][]byte{
 		"kms-key.kubebao.io": []byte(s.config.KeyName),
 	}
@@ -199,6 +226,7 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 		"plaintextSize", len(req.Plaintext),
 		"ciphertextSize", len(ciphertext),
 		"duration", elapsed,
+		"totalEncryptCalls", n,
 	)
 
 	return &v2.EncryptResponse{
@@ -208,12 +236,15 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	}, nil
 }
 
-// Decrypt decrypts the given ciphertext using the transit secrets engine
+// Decrypt decrypts the given ciphertext.
+// apiserver вызывает Decrypt при чтении секрета из etcd, DEK которого обёрнут старым keyID.
 func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.DecryptResponse, error) {
+	n := s.decryptCount.Add(1)
 	s.logger.Info("KMS Decrypt запрос",
 		"uid", req.Uid,
 		"keyId", req.KeyId,
 		"ciphertextSize", len(req.Ciphertext),
+		"decryptCallN", n,
 	)
 
 	if len(req.Ciphertext) == 0 {
@@ -233,6 +264,7 @@ func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.Decry
 		"keyId", req.KeyId,
 		"plaintextSize", len(plaintext),
 		"duration", elapsed,
+		"totalDecryptCalls", n,
 	)
 
 	return &v2.DecryptResponse{
@@ -264,6 +296,7 @@ func (s *Server) Run(ctx context.Context) error {
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(16*1024*1024),
 		grpc.MaxSendMsgSize(16*1024*1024),
+		grpc.UnaryInterceptor(s.unaryInterceptor),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle: 5 * time.Minute,
 			Time:              30 * time.Second,
@@ -278,15 +311,14 @@ func (s *Server) Run(ctx context.Context) error {
 
 	s.logger.Info("Запуск KMS сервера", "socket", s.config.SocketPath, "provider", s.config.EncryptionProvider, "keyName", s.config.KeyName)
 
-	// Ожидание отмены контекста для graceful shutdown
 	go func() {
 		<-ctx.Done()
 		s.logger.Info("Остановка KMS сервера")
 		grpcServer.GracefulStop()
 	}()
 
-	// Периодическая проверка доступности ключа (HealthCheckInterval)
 	go s.healthCheckLoop(ctx)
+	go s.statsReportLoop(ctx)
 
 	// Блокирующий вызов до остановки
 	if err := grpcServer.Serve(listener); err != nil {
@@ -351,4 +383,44 @@ func (s *Server) IsHealthy() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.healthy
+}
+
+// unaryInterceptor логирует все gRPC вызовы (паттерн из Trousseau).
+// Для Status — только debug (вызывается часто), для Encrypt/Decrypt — info.
+func (s *Server) unaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	start := time.Now()
+	resp, err := handler(ctx, req)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		s.logger.Error("gRPC ошибка", "method", info.FullMethod, "duration", elapsed, "error", err)
+	}
+
+	return resp, err
+}
+
+// statsReportLoop выводит сводку операций каждые 60 секунд.
+func (s *Server) statsReportLoop(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.RLock()
+			keyID := s.keyID
+			healthy := s.healthy
+			s.mu.RUnlock()
+
+			s.logger.Info("KMS сводка операций",
+				"keyID", keyID,
+				"healthy", healthy,
+				"totalEncrypt", s.encryptCount.Load(),
+				"totalDecrypt", s.decryptCount.Load(),
+				"totalStatus", s.statusCount.Load(),
+			)
+		}
+	}
 }

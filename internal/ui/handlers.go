@@ -543,7 +543,7 @@ func (h *APIHandler) CSIClasses(w http.ResponseWriter, _ *http.Request) {
 // AllPods returns all pods in the cluster (for CSI attach UI).
 func (h *APIHandler) AllPods(w http.ResponseWriter, r *http.Request) {
 	if h.k8s == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
+		writeJSON(w, http.StatusOK, demoAllPods())
 		return
 	}
 	ns := r.URL.Query().Get("namespace")
@@ -553,7 +553,7 @@ func (h *APIHandler) AllPods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var entries []map[string]interface{}
+	entries := make([]map[string]interface{}, 0, len(pods.Items))
 	for _, p := range pods.Items {
 		if strings.HasPrefix(p.Namespace, "kube-") {
 			continue
@@ -966,6 +966,23 @@ func demoSecrets() []map[string]interface{} {
 			"labels":        map[string]string{"tier": "backend"},
 			"annotations":   map[string]string{},
 			"size":          256,
+		},
+	}
+}
+
+func demoAllPods() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"name": "demo-app-7d4f8b6c9-x2k4l", "namespace": "default",
+			"status": "Running", "ready": "1/1", "node": "worker-1",
+			"ownerKind": "ReplicaSet", "ownerName": "demo-app-7d4f8b6c9",
+			"csiSecrets": []string{}, "containers": 1, "age": "2h30m",
+		},
+		{
+			"name": "my-app-6b8f9c7d5-q3m2n", "namespace": "default",
+			"status": "Running", "ready": "1/1", "node": "worker-1",
+			"ownerKind": "ReplicaSet", "ownerName": "my-app-6b8f9c7d5",
+			"csiSecrets": []string{"kubebao-secrets"}, "containers": 1, "age": "45m",
 		},
 	}
 }
