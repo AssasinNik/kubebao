@@ -10,14 +10,14 @@ import (
 	"github.com/kubebao/kubebao/internal/crypto"
 )
 
-// KuznyechikProvider provides encryption using Kuznyechik (GOST R 34.12-2015)
-// with keys stored in OpenBao KV.
+// KuznyechikProvider — AEAD на базе ГОСТ Р 34.12-2015 (блок 128 бит) и режима из ГОСТ Р 34.13-2015;
+// материал ключа берётся из OpenBao KV через KeyManager.
 type KuznyechikProvider struct {
 	keyManager *KeyManager
 	logger     hclog.Logger
 }
 
-// NewKuznyechikProvider creates a new Kuznyechik encryption provider
+// NewKuznyechikProvider связывает менеджер ключей и логгер; keyManager не может быть nil (паника при использовании).
 func NewKuznyechikProvider(keyManager *KeyManager, logger hclog.Logger) *KuznyechikProvider {
 	return &KuznyechikProvider{
 		keyManager: keyManager,
@@ -93,7 +93,7 @@ func (p *KuznyechikProvider) Decrypt(ctx context.Context, keyName string, cipher
 	return plaintext, nil
 }
 
-// GetKeyInfo returns key information
+// GetKeyInfo отдаёт сведения о ключе в формате TransitKeyInfo для единого контракта EncryptionProvider.
 func (p *KuznyechikProvider) GetKeyInfo(ctx context.Context, keyName string) (*TransitKeyInfo, error) {
 	info, err := p.keyManager.GetKeyInfo(ctx)
 	if err != nil {
@@ -112,7 +112,7 @@ func (p *KuznyechikProvider) GetKeyInfo(ctx context.Context, keyName string) (*T
 	}, nil
 }
 
-// zeroBytes overwrites a byte slice with zeros
+// zeroBytes затирает срез нулями после использования ключа в стеке вызовов Encrypt/Decrypt.
 func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0

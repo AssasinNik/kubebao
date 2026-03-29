@@ -1,4 +1,5 @@
-// Transit клиент — шифрование через OpenBao Transit.
+// Клиент OpenBao Transit: обёртка над HTTP API для шифрования/дешифрования без хранения ключа в плагине.
+// Ключи живут в движке transit; тип ключа (aes256-gcm96 и т.д.) задаётся при создании.
 package kms
 
 import (
@@ -10,7 +11,7 @@ import (
 	"github.com/kubebao/kubebao/internal/openbao"
 )
 
-// TransitKeyInfo holds information about a transit key
+// TransitKeyInfo — снимок метаданных ключа в Transit (имя, последняя версия, тип, экспортируемость).
 type TransitKeyInfo struct {
 	Name          string
 	LatestVersion int
@@ -18,13 +19,13 @@ type TransitKeyInfo struct {
 	Exportable    bool
 }
 
-// TransitClient wraps OpenBao client for transit operations
+// TransitClient держит общий openbao.Client и использует его методы Transit* для KMS-операций.
 type TransitClient struct {
 	client *openbao.Client
 	logger hclog.Logger
 }
 
-// NewTransitClient creates a new transit client
+// NewTransitClient проверяет наличие config/OpenBao и поднимает HTTP-клиент к OpenBao.
 func NewTransitClient(config *Config, logger hclog.Logger) (*TransitClient, error) {
 	if config == nil || config.OpenBao == nil {
 		return nil, fmt.Errorf("config and openbao config are required")
@@ -41,7 +42,7 @@ func NewTransitClient(config *Config, logger hclog.Logger) (*TransitClient, erro
 	}, nil
 }
 
-// Encrypt encrypts the plaintext using the transit secrets engine
+// Encrypt вызывает TransitEncrypt: OpenBao шифрует данные ключом keyName и возвращает vault-токен ciphertext.
 func (t *TransitClient) Encrypt(ctx context.Context, keyName string, plaintext []byte) (string, error) {
 	start := time.Now()
 	defer func() {
@@ -56,7 +57,7 @@ func (t *TransitClient) Encrypt(ctx context.Context, keyName string, plaintext [
 	return ciphertext, nil
 }
 
-// Decrypt decrypts the ciphertext using the transit secrets engine
+// Decrypt вызывает TransitDecrypt и возвращает исходный plaintext после проверки на стороне OpenBao.
 func (t *TransitClient) Decrypt(ctx context.Context, keyName string, ciphertext string) ([]byte, error) {
 	start := time.Now()
 	defer func() {
@@ -71,7 +72,7 @@ func (t *TransitClient) Decrypt(ctx context.Context, keyName string, ciphertext 
 	return plaintext, nil
 }
 
-// GetKeyInfo retrieves information about a transit key
+// GetKeyInfo читает transit/keys/:name и мапит ответ в локальную структуру для Server.initialize/health.
 func (t *TransitClient) GetKeyInfo(ctx context.Context, keyName string) (*TransitKeyInfo, error) {
 	info, err := t.client.TransitGetKeyInfo(ctx, keyName)
 	if err != nil {
@@ -86,12 +87,12 @@ func (t *TransitClient) GetKeyInfo(ctx context.Context, keyName string) (*Transi
 	}, nil
 }
 
-// CreateKey creates a new transit encryption key
+// CreateKey регистрирует новый ключ в движке transit с указанным keyType (см. Validate в config).
 func (t *TransitClient) CreateKey(ctx context.Context, keyName string, keyType string) error {
 	return t.client.TransitCreateKey(ctx, keyName, keyType)
 }
 
-// RotateKey rotates a transit key
+// RotateKey выполняет POST rotate: новая версия ключа, старые ciphertext остаются читаемыми.
 func (t *TransitClient) RotateKey(ctx context.Context, keyName string) error {
 	path := fmt.Sprintf("transit/keys/%s/rotate", keyName)
 	_, err := t.client.WriteSecret(ctx, path, nil)
@@ -103,7 +104,7 @@ func (t *TransitClient) RotateKey(ctx context.Context, keyName string) error {
 	return nil
 }
 
-// UpdateKeyConfig updates the configuration of a transit key
+// UpdateKeyConfig пишет произвольные параметры ключа (min_decryption_version, deletion_allowed и т.д.).
 func (t *TransitClient) UpdateKeyConfig(ctx context.Context, keyName string, config map[string]interface{}) error {
 	path := fmt.Sprintf("transit/keys/%s/config", keyName)
 	_, err := t.client.WriteSecret(ctx, path, config)
@@ -114,7 +115,7 @@ func (t *TransitClient) UpdateKeyConfig(ctx context.Context, keyName string, con
 	return nil
 }
 
-// Health checks the health of the transit secrets engine
+// Health делегирует в общий health OpenBao (доступность API), не привязан строго к одному ключу.
 func (t *TransitClient) Health(ctx context.Context) error {
 	_, err := t.client.Health(ctx)
 	return err

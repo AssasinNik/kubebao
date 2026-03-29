@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	// DefaultKVPathPrefix is the default path prefix for KMS keys in OpenBao KV
+	// DefaultKVPathPrefix — префикс пути в KV OpenBao для ключей Kuznyechik, если в конфиге пусто.
 	DefaultKVPathPrefix = "kubebao/kms-keys"
 )
 
-// KeyManager manages encryption keys stored in OpenBao KV.
+// KeyManager — доступ к сырому ключу Kuznyechik в OpenBao KV с кешированием в памяти процесса.
 type KeyManager struct {
 	client     *openbao.Client
 	kvPath     string
@@ -30,13 +30,13 @@ type KeyManager struct {
 	keyVersion int
 }
 
-// KeyInfo holds information about a key in KV storage
+// KeyInfo — метаданные записи ключа в KV (версия и факт существования).
 type KeyInfo struct {
 	Version int
 	Exists  bool
 }
 
-// NewKeyManager creates a new key manager for Kuznyechik keys in OpenBao KV
+// NewKeyManager строит полный путь kvPathPrefix/keyName и сохраняет флаги создания ключа.
 func NewKeyManager(client *openbao.Client, kvPathPrefix, keyName string, createIfNotExists bool, logger hclog.Logger) (*KeyManager, error) {
 	if client == nil {
 		return nil, fmt.Errorf("openbao client cannot be nil")
@@ -73,14 +73,14 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
-	// Double-check after acquiring write lock
+	// Повторная проверка под эксклюзивной блокировкой: другая горутина могла заполнить кеш.
 	if km.cachedKey != nil {
 		key := make([]byte, len(km.cachedKey))
 		copy(key, km.cachedKey)
 		return key, km.keyVersion, nil
 	}
 
-	// Try to read existing key
+	// Сначала пытаемся прочитать существующую запись из KV без создания.
 	data, err := km.client.KVRead(ctx, km.kvPath)
 	if err == nil {
 		key, version, err := km.parseKeyData(data)
@@ -99,7 +99,7 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 		return keyCopy, version, nil
 	}
 
-	// Key not found - create if allowed
+	// Записи нет: либо создаём новый ключ (crypto/rand), либо возвращаем ошибку политики.
 	if !km.createIfNotExists {
 		return nil, 0, fmt.Errorf("key not found and createKeyIfNotExists is false")
 	}
@@ -137,7 +137,7 @@ func (km *KeyManager) GetOrCreateKey(ctx context.Context) ([]byte, int, error) {
 	return keyCopy, 1, nil
 }
 
-// parseKeyData — разбирает ответ KV: base64(key), version.
+// parseKeyData извлекает из map поля "key" (base64) и "version" (число), проверяет длину ключа Kuznyechik.
 func (km *KeyManager) parseKeyData(data map[string]interface{}) ([]byte, int, error) {
 	keyB64, ok := data["key"].(string)
 	if !ok {
@@ -161,7 +161,7 @@ func (km *KeyManager) parseKeyData(data map[string]interface{}) ([]byte, int, er
 	return key, version, nil
 }
 
-// GetKeyInfo returns key info without caching
+// GetKeyInfo читает KV напрямую (без обновления in-memory кеша) — для health и отображения версии.
 func (km *KeyManager) GetKeyInfo(ctx context.Context) (*KeyInfo, error) {
 	data, err := km.client.KVRead(ctx, km.kvPath)
 	if err != nil {
@@ -179,13 +179,13 @@ func (km *KeyManager) GetKeyInfo(ctx context.Context) (*KeyInfo, error) {
 	}, nil
 }
 
-// InvalidateCache clears the cached key
+// InvalidateCache обнуляет кешированный ключ в памяти (без удаления из OpenBao).
 func (km *KeyManager) InvalidateCache() {
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
 	if km.cachedKey != nil {
-		// Zero out the key in memory
+		// Явное затирание байтов ключа перед освобождением слайса (снижение окна утечки в куче).
 		for i := range km.cachedKey {
 			km.cachedKey[i] = 0
 		}

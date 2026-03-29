@@ -1,4 +1,14 @@
-// KMS сервер — gRPC API для шифрования/дешифрования секретов Kubernetes.
+// Package kms реализует плагин Kubernetes KMS v2 для kube-apiserver.
+//
+// Поток данных (упрощённо):
+//   1) apiserver подключается по Unix-сокету к gRPC-сервису KeyManagementService.
+//   2) Status — частые проверки здоровья и согласования keyID; при смене версии ключа
+//      apiserver сбрасывает кеш DEK и снова вызывает Encrypt.
+//   3) Encrypt — оборачивает (wrap) новый DEK мастер-ключом провайдера; вызывается редко.
+//   4) Decrypt — разворачивает (unwrap) DEK для старых записей в etcd.
+//
+// Зависимость google.golang.org/grpc должна быть не ниже v1.79.3 (исправление GO-2026-4762:
+// обход авторизации при некорректном :path без ведущего слэша).
 package kms
 
 import (
@@ -35,16 +45,16 @@ const (
 type Server struct {
 	v2.UnimplementedKeyManagementServiceServer
 
-	config   *Config
-	provider EncryptionProvider
-	logger   hclog.Logger
-	mu       sync.RWMutex
-	keyID    string
-	healthy  bool
+	config   *Config   // Нормализованная конфигурация (сокет, ключ, провайдер, OpenBao).
+	provider EncryptionProvider // Реализация шифрования: TransitClient или KuznyechikProvider.
+	logger   hclog.Logger       // Структурированные логи (hashicorp go-hclog).
+	mu       sync.RWMutex       // Защита keyID и флага healthy от гонок с healthCheckLoop.
+	keyID    string             // Строка вида name:vN, отдаётся apiserver в Status/Encrypt.
+	healthy  bool               // Итог последней проверки провайдера; влияет на поле Healthz в Status.
 
-	encryptCount atomic.Int64
-	decryptCount atomic.Int64
-	statusCount  atomic.Int64
+	encryptCount atomic.Int64 // Счётчик вызовов Encrypt (для сводки и диагностики).
+	decryptCount atomic.Int64 // Счётчик вызовов Decrypt.
+	statusCount  atomic.Int64 // Счётчик вызовов Status (ожидаемо большой).
 }
 
 // NewServer — создаёт KMS сервер с провайдером Кузнечик (ГОСТ Р 34.12-2015).
@@ -86,7 +96,8 @@ func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 		healthy:  false,
 	}
 
-	// Initialize the server (check/create key)
+	// Инициализация: проверка доступности OpenBao, при необходимости создание ключа (Transit)
+	// или установка placeholder keyID для Kuznyechik до первого Encrypt.
 	if err := server.initialize(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to initialize server: %w", err)
 	}
@@ -94,7 +105,7 @@ func NewServer(config *Config, logger hclog.Logger) (*Server, error) {
 	return server, nil
 }
 
-// newKuznyechikProviderFromConfig creates Kuznyechik provider with KeyManager
+// newKuznyechikProviderFromConfig собирает цепочку OpenBao-клиент → KeyManager → KuznyechikProvider.
 func newKuznyechikProviderFromConfig(config *Config, logger hclog.Logger) (*KuznyechikProvider, error) {
 	baoClient, err := openbao.NewClient(config.OpenBao, logger)
 	if err != nil {
@@ -109,17 +120,17 @@ func newKuznyechikProviderFromConfig(config *Config, logger hclog.Logger) (*Kuzn
 	return NewKuznyechikProvider(keyManager, logger), nil
 }
 
-// initialize initializes the KMS server
+// initialize выполняет однократную подготовку: узнаёт или создаёт ключ, выставляет keyID и healthy.
 func (s *Server) initialize(ctx context.Context) error {
 	s.logger.Info("Инициализация KMS сервера", "keyName", s.config.KeyName, "provider", s.config.EncryptionProvider)
 
 	keyInfo, err := s.provider.GetKeyInfo(ctx, s.config.KeyName)
 	if err != nil {
 		if s.config.EncryptionProvider == ProviderKuznyechik {
-			// Kuznyechik provider creates key on first Encrypt - GetKeyInfo may fail for new keys
-			// Try to trigger key creation via GetOrCreateKey in the provider
+			// Для Kuznyechik запись в KV появляется при первом Encrypt — GetKeyInfo до этого пустой.
+			// Разрешаем «мягкий» старт: помечаем здоровым и задаём предварительный keyID.
 			if s.config.CreateKeyIfNotExists {
-				// KeyManager will create on first Encrypt; use placeholder keyID for now
+				// Фактическая версия появится после первого GetOrCreateKey в Encrypt.
 				s.mu.Lock()
 				s.keyID = fmt.Sprintf("%s:v1", s.config.KeyName)
 				s.healthy = true
@@ -133,7 +144,7 @@ func (s *Server) initialize(ctx context.Context) error {
 			return fmt.Errorf("key not found and createKeyIfNotExists is false: %w", err)
 		}
 
-		// For Transit: create the key
+		// Для Transit явно создаём ключ в движке transit, затем перечитываем метаданные.
 		if transit, ok := s.provider.(*TransitClient); ok {
 			s.logger.Info("Создание Transit ключа", "keyName", s.config.KeyName, "keyType", s.config.KeyType)
 			if err := transit.CreateKey(ctx, s.config.KeyName, s.config.KeyType); err != nil {
@@ -158,9 +169,8 @@ func (s *Server) initialize(ctx context.Context) error {
 	return nil
 }
 
-// Status returns the status of the KMS plugin.
-// apiserver вызывает Status часто — при изменении keyID apiserver инвалидирует DEK-кеш
-// и вызывает Encrypt для генерации нового DEK.
+// Status — обязательный метод KMS v2: версия API, health и текущий keyID.
+// apiserver опрашивает часто; смена keyID заставляет сбросить кеш DEK и вызвать Encrypt.
 func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusResponse, error) {
 	s.statusCount.Add(1)
 
@@ -186,10 +196,8 @@ func (s *Server) Status(ctx context.Context, req *v2.StatusRequest) (*v2.StatusR
 	}, nil
 }
 
-// Encrypt encrypts the given plaintext using the configured provider.
-// В KMS v2 apiserver вызывает Encrypt при генерации нового DEK (старт, ротация keyID).
-// apiserver затем кеширует DEK и шифрует секреты локально — поэтому Encrypt вызывается
-// редко, а не на каждый Secret. Это нормальное поведение KMS v2.
+// Encrypt шифрует plaintext (обычно это DEK apiserver) выбранным провайдером.
+// В KMS v2 вызовы редкие: после Encrypt apiserver кеширует DEK и шифрует Secret локально.
 func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.EncryptResponse, error) {
 	n := s.encryptCount.Add(1)
 	s.logger.Info("KMS Encrypt запрос (обёртка DEK для apiserver)",
@@ -236,8 +244,7 @@ func (s *Server) Encrypt(ctx context.Context, req *v2.EncryptRequest) (*v2.Encry
 	}, nil
 }
 
-// Decrypt decrypts the given ciphertext.
-// apiserver вызывает Decrypt при чтении секрета из etcd, DEK которого обёрнут старым keyID.
+// Decrypt восстанавливает plaintext (DEK) из ciphertext для записей с устаревшим или иным keyID.
 func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.DecryptResponse, error) {
 	n := s.decryptCount.Add(1)
 	s.logger.Info("KMS Decrypt запрос",
@@ -272,7 +279,8 @@ func (s *Server) Decrypt(ctx context.Context, req *v2.DecryptRequest) (*v2.Decry
 	}, nil
 }
 
-// Run starts the KMS gRPC server
+// Run поднимает Unix-listener, регистрирует gRPC-сервис и блокируется на Serve до остановки.
+// Контекст ctx отменяется при shutdown: graceful stop gRPC, закрытие слушателя через defer.
 func (s *Server) Run(ctx context.Context) error {
 	socketDir := filepath.Dir(s.config.SocketPath)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
@@ -293,10 +301,12 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
+	// Параметры сообщений: apiserver может передавать крупные DEK-пакеты при пиковых нагрузках.
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(16*1024*1024),
 		grpc.MaxSendMsgSize(16*1024*1024),
 		grpc.UnaryInterceptor(s.unaryInterceptor),
+		// Keepalive согласует разрыв «зависших» соединений и совместимость с клиентом apiserver.
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle: 5 * time.Minute,
 			Time:              30 * time.Second,
@@ -343,7 +353,7 @@ func (s *Server) healthCheckLoop(ctx context.Context) {
 	}
 }
 
-// performHealthCheck checks the health of the KMS plugin
+// performHealthCheck синхронизирует keyID с OpenBao и сбрасывает healthy при ошибках (кроме Kuznyechik до первого ключа).
 func (s *Server) performHealthCheck(ctx context.Context) {
 	keyInfo, err := s.provider.GetKeyInfo(ctx, s.config.KeyName)
 
@@ -351,9 +361,8 @@ func (s *Server) performHealthCheck(ctx context.Context) {
 	defer s.mu.Unlock()
 
 	if err != nil {
-		// For Kuznyechik, key might not exist until first Encrypt
+		// Пока ключа нет в KV, GetKeyInfo даёт ошибку — для уже «зелёного» Kuznyechik не деградируем.
 		if s.config.EncryptionProvider == ProviderKuznyechik && s.healthy {
-			// Stay healthy if we were healthy - key might not exist yet
 			return
 		}
 		s.logger.Warn("Проверка здоровья не пройдена", "error", err)
@@ -361,7 +370,7 @@ func (s *Server) performHealthCheck(ctx context.Context) {
 		return
 	}
 
-	// Update key ID if version changed (key rotation)
+	// Ротация в OpenBao/Transit увеличивает LatestVersion — apiserver увидит новый keyID через Status.
 	newKeyID := fmt.Sprintf("%s:v%d", s.config.KeyName, keyInfo.LatestVersion)
 	if newKeyID != s.keyID {
 		s.logger.Info("Версия ключа изменилась", "oldKeyID", s.keyID, "newKeyID", newKeyID)
@@ -371,14 +380,14 @@ func (s *Server) performHealthCheck(ctx context.Context) {
 	s.healthy = true
 }
 
-// GetKeyID returns the current key ID
+// GetKeyID возвращает строковый идентификатор ключа для внешних наблюдателей (тесты, метрики).
 func (s *Server) GetKeyID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.keyID
 }
 
-// IsHealthy returns whether the server is healthy
+// IsHealthy отражает результат последних проверок провайдера и инициализации.
 func (s *Server) IsHealthy() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

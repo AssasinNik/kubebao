@@ -1,4 +1,5 @@
-// Конфигурация KMS — сокет, ключ, провайдер (transit/kuznyechik).
+// Конфигурация плагина KMS: YAML-файл, переменные окружения, значения по умолчанию и Validate.
+// LoadConfig применяет setDefaults+Validate; LoadConfigFromEnv — только заполнение из env без Validate.
 package kms
 
 import (
@@ -10,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// EncryptionProvider type
+// Идентификаторы провайдеров шифрования в конфиге (строковые литералы в YAML).
 const (
 	ProviderTransit    = "transit"
 	ProviderKuznyechik = "kuznyechik"
@@ -35,7 +36,7 @@ type Config struct {
 	OpenBao *openbao.Config `yaml:"openbao"` // Адрес, токен, TLS для OpenBao
 }
 
-// LoadConfig loads the KMS configuration from a YAML file
+// LoadConfig читает YAML по пути path, применяет значения по умолчанию и Validate.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,7 +57,8 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// LoadConfigFromEnv loads configuration from environment variables
+// LoadConfigFromEnv собирает конфигурацию только из переменных окружения (префикс KUBEBAO_KMS_*).
+// В отличие от LoadConfig, валидация не вызывается — вызывающий код должен вызвать Validate при необходимости.
 func LoadConfigFromEnv() *Config {
 	config := &Config{
 		SocketPath:           getEnvDefault("KUBEBAO_KMS_SOCKET", "/var/run/kubebao/kms.sock"),
@@ -72,7 +74,7 @@ func LoadConfigFromEnv() *Config {
 	return config
 }
 
-// setDefaults sets default values for the configuration
+// setDefaults заполняет пустые поля разумными значениями для локальной разработки и Helm-чартов.
 func (c *Config) setDefaults() {
 	if c.SocketPath == "" {
 		c.SocketPath = "/var/run/kubebao/kms.sock"
@@ -103,7 +105,7 @@ func (c *Config) setDefaults() {
 	}
 }
 
-// Validate validates the KMS configuration
+// Validate проверяет обязательные поля, допустимость provider/keyType и вложенный openbao.Config.
 func (c *Config) Validate() error {
 	if c.SocketPath == "" {
 		return fmt.Errorf("socketPath is required")
@@ -148,7 +150,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// getEnvDefault returns the value of an environment variable or a default value
+// getEnvDefault возвращает значение переменной key или defaultValue, если переменная пустая.
 func getEnvDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -156,7 +158,7 @@ func getEnvDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvBool returns the boolean value of an environment variable or a default value
+// getEnvBool парсит true/1/yes как истину; пустая строка — defaultValue.
 func getEnvBool(key string, defaultValue bool) bool {
 	value := os.Getenv(key)
 	if value == "" {
@@ -165,7 +167,7 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return value == "true" || value == "1" || value == "yes"
 }
 
-// getDurationEnv returns the duration value of an environment variable or a default value
+// getDurationEnv разбирает длительность через time.ParseDuration; при ошибке — defaultValue.
 func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	value := os.Getenv(key)
 	if value == "" {
@@ -178,7 +180,7 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	return d
 }
 
-// DefaultConfig returns a default KMS configuration
+// DefaultConfig возвращает полностью заполненный объект для тестов и встраивания без файла.
 func DefaultConfig() *Config {
 	return &Config{
 		SocketPath:           "/var/run/kubebao/kms.sock",
